@@ -312,22 +312,25 @@ async def delete_vehicle(vid: str, _: dict = Depends(admin_required)):
 
 @api_router.post("/vehicles/assign")
 async def assign_vehicle(body: AssignIn, _: dict = Depends(admin_required)):
-    # Unassign any vehicle currently assigned to user
+    # Validate target vehicle exists FIRST (and is available or already assigned to this user)
+    veh = await db.vehicles.find_one({"id": body.vehicle_id}, {"_id": 0})
+    if not veh:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    if veh.get("assigned_to") and veh["assigned_to"] != body.user_id:
+        raise HTTPException(status_code=409, detail="Vehicle already assigned to another user")
+    # Unassign any vehicle currently assigned to user (other than the target)
     await db.vehicles.update_many(
-        {"assigned_to": body.user_id},
+        {"assigned_to": body.user_id, "id": {"$ne": body.vehicle_id}},
         {"$set": {"assigned_to": None, "status": "available", "rental_start_date": None}},
     )
     start = body.rental_start_date or now_utc_iso()
-    res = await db.vehicles.update_one(
+    await db.vehicles.update_one(
         {"id": body.vehicle_id},
         {"$set": {"assigned_to": body.user_id, "status": "rented", "rental_start_date": start}},
     )
-    if res.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
     # Create first pending payment if none exists
-    veh = await db.vehicles.find_one({"id": body.vehicle_id}, {"_id": 0})
     existing = await db.payments.find_one({"user_id": body.user_id, "status": "pending"}, {"_id": 0})
-    if not existing and veh:
+    if not existing:
         due = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         await db.payments.insert_one({
             "id": str(uuid.uuid4()), "user_id": body.user_id, "vehicle_id": body.vehicle_id,

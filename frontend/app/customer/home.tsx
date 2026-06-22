@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl, Linking, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import * as Location from "expo-location";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
+import { getStatus, requestPermissions, sendCurrentLocation, startBackgroundTracking, stopBackgroundTracking, isBackgroundRunning } from "@/src/services/location";
 
 type Vehicle = any;
 type Payment = any;
@@ -21,6 +21,8 @@ export default function Home() {
   const [notifs, setNotifs] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [locStatus, setLocStatus] = useState({ granted: false, background: false, canAskAgain: true, lastAt: "" });
+  const [locBusy, setLocBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -37,28 +39,54 @@ export default function Home() {
     } catch {} finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const refreshLocStatus = useCallback(async () => {
+    const s = await getStatus();
+    const bgRunning = await isBackgroundRunning();
+    setLocStatus({ granted: s.granted, background: s.background && bgRunning, canAskAgain: s.canAskAgain, lastAt: "" });
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); refreshLocStatus(); }, [load, refreshLocStatus]));
 
   useEffect(() => {
-    // Request and share location once on home mount
+    // Send current location once on mount if permission already granted
     (async () => {
-      if (Platform.OS === "web") return;
-      try {
-        const fg = await Location.requestForegroundPermissionsAsync();
-        if (fg.status !== "granted") return;
-        // Background permission (best effort - won't block)
-        try { await Location.requestBackgroundPermissionsAsync(); } catch {}
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        await api("/users/me/location", { method: "POST", body: { latitude: loc.coords.latitude, longitude: loc.coords.longitude } });
-      } catch {}
+      const s = await getStatus();
+      if (s.granted) {
+        const r = await sendCurrentLocation();
+        if (r) setLocStatus((prev) => ({ ...prev, lastAt: new Date().toISOString() }));
+        if (s.background) {
+          const ok = await startBackgroundTracking();
+          setLocStatus((prev) => ({ ...prev, background: ok }));
+        }
+      }
     })();
   }, []);
 
+  const onEnableLocation = async () => {
+    setLocBusy(true);
+    try {
+      const s = await getStatus();
+      if (!s.granted && !s.canAskAgain) {
+        await Linking.openSettings();
+        return;
+      }
+      const r = await requestPermissions();
+      if (r.granted) {
+        await sendCurrentLocation();
+        if (r.background) await startBackgroundTracking();
+      }
+      await refreshLocStatus();
+    } finally { setLocBusy(false); }
+  };
+
+  const onDisableLocation = async () => {
+    await stopBackgroundTracking();
+    await refreshLocStatus();
+  };
+
   const onRefresh = () => { setRefreshing(true); load(); };
 
-  if (loading) {
-    return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
-  }
+  if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
 
   const dueDate = pending?.due_date ? new Date(pending.due_date) : null;
   const daysLeft = dueDate ? Math.max(0, Math.ceil((dueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : null;
@@ -74,6 +102,48 @@ export default function Home() {
           <Pressable onPress={() => router.push("/customer/profile")} testID="home-profile-button" style={styles.avatar}>
             <Ionicons name="person" color={colors.onBrandPrimary} size={22} />
           </Pressable>
+        </View>
+
+        {/* Location banner */}
+        <View
+          style={[
+            styles.locBanner,
+            { backgroundColor: locStatus.granted ? colors.brandTertiary : colors.warning + "18", borderColor: locStatus.granted ? colors.brandSecondary : colors.warning + "44" },
+          ]}
+          testID="location-banner"
+        >
+          <Ionicons name={locStatus.granted ? "location" : "location-outline"} size={20} color={locStatus.granted ? colors.brandPrimary : colors.warning} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.locTitle, { color: locStatus.granted ? colors.brandPrimary : colors.warning }]}>
+              {Platform.OS === "web"
+                ? "Live location sharing"
+                : locStatus.granted
+                ? (locStatus.background ? "Live location sharing active" : "Location sharing active")
+                : "Enable location sharing"}
+            </Text>
+            <Text style={styles.locBody}>
+              {Platform.OS === "web"
+                ? "Available in the mobile app. Share your live location for rental tracking."
+                : locStatus.granted
+                ? (locStatus.background ? "Sharing live updates with the rental business." : "Tap below to also enable background tracking.")
+                : "Share your live location for rental tracking. Required by your rental agreement."}
+            </Text>
+          </View>
+          {Platform.OS !== "web" && (
+            locStatus.granted ? (
+              locStatus.background ? (
+                <Pressable testID="loc-stop-button" onPress={onDisableLocation} style={styles.locBtnGhost}><Text style={styles.locBtnGhostText}>Stop</Text></Pressable>
+              ) : (
+                <Pressable testID="loc-enable-bg-button" onPress={onEnableLocation} disabled={locBusy} style={styles.locBtn}>
+                  {locBusy ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : <Text style={styles.locBtnText}>Enable</Text>}
+                </Pressable>
+              )
+            ) : (
+              <Pressable testID="loc-enable-button" onPress={onEnableLocation} disabled={locBusy} style={styles.locBtn}>
+                {locBusy ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : <Text style={styles.locBtnText}>{locStatus.canAskAgain ? "Allow" : "Settings"}</Text>}
+              </Pressable>
+            )
+          )}
         </View>
 
         {/* Payment Card */}
@@ -165,6 +235,13 @@ const styles = StyleSheet.create({
   hi: { fontSize: type.base, color: colors.onSurfaceSecondary },
   name: { fontSize: type.xxl, fontWeight: "700", color: colors.onSurface },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  locBanner: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, marginBottom: spacing.md },
+  locTitle: { fontSize: type.base, fontWeight: "700" },
+  locBody: { fontSize: type.sm, color: colors.onSurfaceSecondary, marginTop: 2 },
+  locBtn: { backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, minWidth: 72, alignItems: "center" },
+  locBtnText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.sm },
+  locBtnGhost: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.brandPrimary },
+  locBtnGhostText: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.sm },
   paymentCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.divider },
   paymentTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
   paymentLabel: { fontSize: type.sm, color: colors.onSurfaceSecondary, marginBottom: spacing.xs },
