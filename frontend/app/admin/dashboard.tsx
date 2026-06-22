@@ -19,6 +19,13 @@ export default function AdminDashboard() {
 
   const logout = async () => { await clearAuth(); router.replace("/auth/login"); };
 
+  const runReminders = async () => {
+    try {
+      await api("/admin/reminders/run", { method: "POST" });
+      load();
+    } catch {}
+  };
+
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
 
   return (
@@ -53,11 +60,13 @@ export default function AdminDashboard() {
         </View>
 
         <Text style={styles.section}>Quick Actions</Text>
+        <ActionRow icon="map-outline" label="View Rider Locations on Map" onPress={() => router.push("/admin/map")} />
         <ActionRow icon="bicycle-outline" label="Manage Vehicles" onPress={() => router.push("/admin/vehicles")} />
         <ActionRow icon="people-outline" label="Manage Users & Assign Vehicles" onPress={() => router.push("/admin/users")} />
         <ActionRow icon="cash-outline" label="Track Payments" onPress={() => router.push("/admin/payments")} />
         <ActionRow icon="document-text-outline" label="Review Documents" onPress={() => router.push("/admin/more")} />
         <ActionRow icon="megaphone-outline" label="Send Announcement" onPress={() => router.push("/admin/more")} />
+        <ActionRow icon="alarm-outline" label="Run Weekly Reminders Now" onPress={runReminders} />
       </ScrollView>
     </SafeAreaView>
   );

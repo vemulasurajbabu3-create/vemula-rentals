@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -498,6 +499,13 @@ async def admin_stats(_: dict = Depends(admin_required)):
     }
 
 
+@api_router.post("/admin/reminders/run")
+async def admin_run_reminders(_: dict = Depends(admin_required)):
+    """Manually trigger the weekly reminder check (idempotent)."""
+    await _create_reminders_once()
+    return {"ok": True}
+
+
 # -------------------- SEED --------------------
 async def seed_demo_data():
     """Seed a small demo dataset on first boot."""
@@ -549,6 +557,56 @@ async def seed_demo_data():
         },
     ]
     await db.vehicles.insert_many(samples)
+
+
+# -------------------- WEEKLY REMINDER SCHEDULER --------------------
+async def _create_reminders_once():
+    """Find pending payments due within 24h that haven't had a T-1 reminder yet,
+    create one notification per (user, payment). Idempotent via reminder_sent flag."""
+    now = datetime.now(timezone.utc)
+    horizon = (now + timedelta(days=1)).isoformat()
+    cursor = db.payments.find({
+        "status": "pending",
+        "due_date": {"$lte": horizon},
+        "reminder_sent": {"$ne": True},
+    }, {"_id": 0})
+    async for p in cursor:
+        user = await db.users.find_one({"id": p["user_id"]}, {"_id": 0})
+        veh = await db.vehicles.find_one({"id": p.get("vehicle_id")}, {"_id": 0}) if p.get("vehicle_id") else None
+        due_str = ""
+        try:
+            due_str = datetime.fromisoformat(p["due_date"]).strftime("%d %b")
+        except Exception:
+            pass
+        # Notify user
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()), "user_id": p["user_id"],
+            "title": "Weekly Payment Reminder",
+            "body": f"Your weekly rent of ₹{p['amount']:.0f} is due on {due_str}. Pay via UPI from the Payments tab.",
+            "read": False, "created_at": now_utc_iso(),
+        })
+        # Notify business (broadcast row visible to admin)
+        rider = (user.get("full_name") if user else None) or (user.get("phone") if user else "Rider")
+        veh_text = f"{veh['model']} ({veh['number_plate']})" if veh else "Vehicle"
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()), "user_id": None,
+            "title": "Payment Reminder Sent",
+            "body": f"{rider} · {veh_text} · ₹{p['amount']:.0f} due {due_str}",
+            "read": False, "created_at": now_utc_iso(),
+        })
+        await db.payments.update_one({"id": p["id"]}, {"$set": {"reminder_sent": True, "reminder_sent_at": now_utc_iso()}})
+
+
+async def reminder_loop():
+    """Run reminder check every hour. Idempotent so safe to retry."""
+    # Initial small delay so app finishes startup
+    await asyncio.sleep(15)
+    while True:
+        try:
+            await _create_reminders_once()
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Reminder loop error: {e}")
+        await asyncio.sleep(3600)  # every hour
 
 
 # -------------------- APP SETUP --------------------
