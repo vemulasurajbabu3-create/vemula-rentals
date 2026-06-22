@@ -89,7 +89,10 @@ export default function Home() {
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
 
   const dueDate = pending?.due_date ? new Date(pending.due_date) : null;
-  const daysLeft = dueDate ? Math.max(0, Math.ceil((dueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : null;
+  const daysLeft = dueDate ? Math.ceil((dueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+  const lateFee = pending ? Number(pending.late_fee || 0) : 0;
+  const pendingTotal = pending ? Number(pending.amount) + lateFee : 0;
+  const isOverdue = lateFee > 0;
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]} testID="home-screen">
@@ -151,16 +154,25 @@ export default function Home() {
           <View style={styles.paymentTop}>
             <View>
               <Text style={styles.paymentLabel}>Weekly Payment</Text>
-              <Text style={styles.paymentAmount}>₹{pending ? Number(pending.amount).toFixed(0) : "0"}</Text>
+              <Text style={styles.paymentAmount}>₹{pending ? pendingTotal.toFixed(0) : "0"}</Text>
+              {isOverdue && (
+                <Text style={styles.feeBreak} testID="home-fee-break">
+                  ₹{Number(pending.amount).toFixed(0)} rent + <Text style={{ color: colors.error, fontWeight: "700" }}>₹{lateFee.toFixed(0)} late fee</Text>
+                </Text>
+              )}
             </View>
-            <View style={[styles.statusChip, { backgroundColor: pending ? colors.warning + "22" : colors.brandSecondary }]}>
-              <Text style={[styles.statusChipText, { color: pending ? colors.warning : colors.onBrandSecondary }]}>
-                {pending ? "Pending" : "All Paid"}
+            <View style={[styles.statusChip, { backgroundColor: !pending ? colors.brandSecondary : isOverdue ? colors.error + "22" : colors.warning + "22" }]}>
+              <Text style={[styles.statusChipText, { color: !pending ? colors.onBrandSecondary : isOverdue ? colors.error : colors.warning }]}>
+                {!pending ? "All Paid" : isOverdue ? "Overdue" : "Pending"}
               </Text>
             </View>
           </View>
           {pending && (
-            <Text style={styles.due}>Due in {daysLeft} {daysLeft === 1 ? "day" : "days"} · {dueDate?.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</Text>
+            <Text style={[styles.due, isOverdue && { color: colors.error }]}>
+              {isOverdue
+                ? `Overdue by ${-daysLeft!} ${-daysLeft! === 1 ? "day" : "days"} · was due ${dueDate?.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`
+                : `Due in ${daysLeft} ${daysLeft === 1 ? "day" : "days"} · ${dueDate?.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}
+            </Text>
           )}
           <Pressable
             testID="quick-pay-button"
@@ -249,6 +261,7 @@ const styles = StyleSheet.create({
   statusChip: { paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.pill },
   statusChipText: { fontSize: type.sm, fontWeight: "700" },
   due: { fontSize: type.base, color: colors.warning, marginTop: spacing.sm, fontWeight: "600" },
+  feeBreak: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 4 },
   payCta: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, height: 48, borderRadius: radius.md, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
   payCtaText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.base },
   sectionTitle: { fontSize: type.lg, fontWeight: "700", color: colors.onSurface, marginTop: spacing.xl, marginBottom: spacing.md },
