@@ -67,6 +67,7 @@ export default function AdminDashboard() {
         <ActionRow icon="document-text-outline" label="Review Documents" onPress={() => router.push("/admin/more")} />
         <ActionRow icon="megaphone-outline" label="Send Announcement" onPress={() => router.push("/admin/more")} />
         <ActionRow icon="alarm-outline" label="Run Weekly Reminders Now" onPress={runReminders} />
+        <ActionRow icon="settings-outline" label="Reminder & Late Fee Settings" onPress={() => router.push("/admin/settings")} />
       </ScrollView>
     </SafeAreaView>
   );

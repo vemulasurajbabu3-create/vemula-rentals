@@ -113,6 +113,7 @@ class Payment(BaseModel):
     user_id: str
     vehicle_id: Optional[str]
     amount: float
+    late_fee: float = 0.0
     due_date: str
     status: str  # pending | paid | failed
     transaction_id: Optional[str] = None
@@ -159,6 +160,20 @@ class NotificationCreate(BaseModel):
     user_id: Optional[str] = None
     title: str
     body: str
+
+
+class SettingsModel(BaseModel):
+    reminder_weekday: int = 0  # 0=Monday ... 6=Sunday
+    reminder_hour_ist: int = 9  # 0-23, IST hour
+    late_fee_per_day: float = 50.0  # ₹ per day overdue
+    grace_days: int = 0  # no fee for first N days late
+
+
+class SettingsUpdate(BaseModel):
+    reminder_weekday: Optional[int] = None
+    reminder_hour_ist: Optional[int] = None
+    late_fee_per_day: Optional[float] = None
+    grace_days: Optional[int] = None
 
 
 # -------------------- AUTH HELPERS --------------------
@@ -351,17 +366,22 @@ async def assign_vehicle(body: AssignIn, _: dict = Depends(admin_required)):
 # -------------------- PAYMENT ROUTES --------------------
 @api_router.get("/payments/me", response_model=List[Payment])
 async def list_my_payments(user: dict = Depends(current_user)):
+    # Recompute late fees on read so amounts are always current
+    await _compute_late_fees_once()
     items = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [Payment(**i) for i in items]
 
 
 @api_router.post("/payments/{pid}/mark-paid", response_model=Payment)
 async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depends(current_user)):
+    # Ensure late fee is current before marking paid
+    await _compute_late_fees_once()
     p = await db.payments.find_one({"id": pid, "user_id": user["id"]}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Payment not found")
     if p["status"] == "paid":
         return Payment(**p)
+    paid_total = float(p["amount"]) + float(p.get("late_fee", 0.0))
     await db.payments.update_one(
         {"id": pid},
         {"$set": {"status": "paid", "transaction_id": body.transaction_id, "paid_at": now_utc_iso()}},
@@ -372,14 +392,14 @@ async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depend
         due = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         await db.payments.insert_one({
             "id": str(uuid.uuid4()), "user_id": user["id"], "vehicle_id": veh["id"],
-            "amount": veh["weekly_rent"], "due_date": due, "status": "pending",
+            "amount": veh["weekly_rent"], "late_fee": 0.0, "due_date": due, "status": "pending",
             "transaction_id": None, "paid_at": None, "created_at": now_utc_iso(),
         })
     # Notify admin
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "user_id": None,
         "title": "Payment Received",
-        "body": f"₹{p['amount']} received from {user.get('full_name') or user['phone']} (txn {body.transaction_id})",
+        "body": f"₹{paid_total:.0f} received from {user.get('full_name') or user['phone']} (txn {body.transaction_id})",
         "read": False, "created_at": now_utc_iso(),
     })
     p2 = await db.payments.find_one({"id": pid}, {"_id": 0})
@@ -501,9 +521,41 @@ async def admin_stats(_: dict = Depends(admin_required)):
 
 @api_router.post("/admin/reminders/run")
 async def admin_run_reminders(_: dict = Depends(admin_required)):
-    """Manually trigger the weekly reminder check (idempotent)."""
-    await _create_reminders_once()
-    return {"ok": True}
+    """Manually trigger late fee recompute + reminders for all pending payments."""
+    await _compute_late_fees_once()
+    count = await _create_reminders_for_pending()
+    return {"ok": True, "reminders_sent": count}
+
+
+@api_router.get("/admin/settings")
+async def admin_get_settings(_: dict = Depends(admin_required)):
+    s = await get_settings_doc()
+    return {
+        "reminder_weekday": s.get("reminder_weekday", 0),
+        "reminder_hour_ist": s.get("reminder_hour_ist", 9),
+        "late_fee_per_day": s.get("late_fee_per_day", 50.0),
+        "grace_days": s.get("grace_days", 0),
+    }
+
+
+@api_router.put("/admin/settings")
+async def admin_update_settings(body: SettingsUpdate, _: dict = Depends(admin_required)):
+    upd = {k: v for k, v in body.dict().items() if v is not None}
+    if upd:
+        # validate ranges
+        if "reminder_weekday" in upd and not 0 <= upd["reminder_weekday"] <= 6:
+            raise HTTPException(status_code=400, detail="reminder_weekday must be 0-6")
+        if "reminder_hour_ist" in upd and not 0 <= upd["reminder_hour_ist"] <= 23:
+            raise HTTPException(status_code=400, detail="reminder_hour_ist must be 0-23")
+        if "late_fee_per_day" in upd and upd["late_fee_per_day"] < 0:
+            raise HTTPException(status_code=400, detail="late_fee_per_day must be >= 0")
+        if "grace_days" in upd and upd["grace_days"] < 0:
+            raise HTTPException(status_code=400, detail="grace_days must be >= 0")
+        await db.settings.update_one({"id": "global"}, {"$set": upd}, upsert=True)
+        # Recompute fees immediately if fee/grace changed
+        if "late_fee_per_day" in upd or "grace_days" in upd:
+            await _compute_late_fees_once()
+    return await admin_get_settings()
 
 
 # -------------------- SEED --------------------
@@ -559,54 +611,131 @@ async def seed_demo_data():
     await db.vehicles.insert_many(samples)
 
 
-# -------------------- WEEKLY REMINDER SCHEDULER --------------------
-async def _create_reminders_once():
-    """Find pending payments due within 24h that haven't had a T-1 reminder yet,
-    create one notification per (user, payment). Idempotent via reminder_sent flag."""
+# -------------------- SETTINGS HELPERS --------------------
+DEFAULT_SETTINGS = {
+    "id": "global",
+    "reminder_weekday": 0,
+    "reminder_hour_ist": 9,
+    "late_fee_per_day": 50.0,
+    "grace_days": 0,
+}
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+async def get_settings_doc() -> dict:
+    doc = await db.settings.find_one({"id": "global"}, {"_id": 0})
+    if not doc:
+        await db.settings.insert_one(dict(DEFAULT_SETTINGS))
+        return dict(DEFAULT_SETTINGS)
+    return doc
+
+
+# -------------------- LATE FEE ENGINE --------------------
+async def _compute_late_fees_once():
+    """For each pending payment past due_date, set late_fee = max(0, days_overdue - grace) * late_fee_per_day.
+    Idempotent — re-runs simply recompute to the correct current value."""
+    settings = await get_settings_doc()
+    fee_per_day = float(settings.get("late_fee_per_day", 50.0))
+    grace = int(settings.get("grace_days", 0))
     now = datetime.now(timezone.utc)
-    horizon = (now + timedelta(days=1)).isoformat()
-    cursor = db.payments.find({
-        "status": "pending",
-        "due_date": {"$lte": horizon},
-        "reminder_sent": {"$ne": True},
-    }, {"_id": 0})
+    cursor = db.payments.find({"status": "pending"}, {"_id": 0})
     async for p in cursor:
+        try:
+            due = datetime.fromisoformat(p["due_date"])
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        days_overdue = max(0, (now.date() - due.date()).days)
+        billable_days = max(0, days_overdue - grace)
+        new_fee = round(billable_days * fee_per_day, 2)
+        if abs(float(p.get("late_fee", 0.0)) - new_fee) > 0.001:
+            await db.payments.update_one({"id": p["id"]}, {"$set": {"late_fee": new_fee}})
+
+
+# -------------------- WEEKLY REMINDER SCHEDULER --------------------
+async def _create_reminders_for_pending():
+    """Send a reminder to every customer with a pending payment + a summary to admin."""
+    now = datetime.now(timezone.utc)
+    settings = await get_settings_doc()
+    cursor = db.payments.find({"status": "pending"}, {"_id": 0})
+    sent_count = 0
+    async for p in cursor:
+        # Avoid spamming: skip if a reminder was already sent in the last 6 days
+        last_at = p.get("reminder_sent_at")
+        if last_at:
+            try:
+                la = datetime.fromisoformat(last_at)
+                if la.tzinfo is None:
+                    la = la.replace(tzinfo=timezone.utc)
+                if (now - la).total_seconds() < 6 * 86400:
+                    continue
+            except Exception:
+                pass
         user = await db.users.find_one({"id": p["user_id"]}, {"_id": 0})
         veh = await db.vehicles.find_one({"id": p.get("vehicle_id")}, {"_id": 0}) if p.get("vehicle_id") else None
-        due_str = ""
         try:
             due_str = datetime.fromisoformat(p["due_date"]).strftime("%d %b")
         except Exception:
-            pass
-        # Notify user
+            due_str = ""
+        late_fee = float(p.get("late_fee", 0.0))
+        total = float(p["amount"]) + late_fee
+        fee_line = f" (incl. ₹{late_fee:.0f} late fee)" if late_fee > 0 else ""
         await db.notifications.insert_one({
             "id": str(uuid.uuid4()), "user_id": p["user_id"],
             "title": "Weekly Payment Reminder",
-            "body": f"Your weekly rent of ₹{p['amount']:.0f} is due on {due_str}. Pay via UPI from the Payments tab.",
+            "body": f"Your weekly rent of ₹{total:.0f}{fee_line} is due on {due_str}. Pay via UPI from the Payments tab.",
             "read": False, "created_at": now_utc_iso(),
         })
-        # Notify business (broadcast row visible to admin)
         rider = (user.get("full_name") if user else None) or (user.get("phone") if user else "Rider")
         veh_text = f"{veh['model']} ({veh['number_plate']})" if veh else "Vehicle"
         await db.notifications.insert_one({
             "id": str(uuid.uuid4()), "user_id": None,
             "title": "Payment Reminder Sent",
-            "body": f"{rider} · {veh_text} · ₹{p['amount']:.0f} due {due_str}",
+            "body": f"{rider} · {veh_text} · ₹{total:.0f}{fee_line} due {due_str}",
             "read": False, "created_at": now_utc_iso(),
         })
         await db.payments.update_one({"id": p["id"]}, {"$set": {"reminder_sent": True, "reminder_sent_at": now_utc_iso()}})
+        sent_count += 1
+    return sent_count
 
 
-async def reminder_loop():
-    """Run reminder check every hour. Idempotent so safe to retry."""
-    # Initial small delay so app finishes startup
+async def _create_reminders_once():
+    """Backwards-compatible alias used by manual trigger and old code paths."""
+    await _compute_late_fees_once()
+    return await _create_reminders_for_pending()
+
+
+async def scheduler_loop():
+    """Runs forever, wakes up every 5 minutes.
+    - Daily at any time: recompute late fees (idempotent).
+    - On configured weekday at configured IST hour: send reminders (once per day, idempotent via last_fired_date)."""
     await asyncio.sleep(15)
     while True:
         try:
-            await _create_reminders_once()
+            await _compute_late_fees_once()
+            settings = await get_settings_doc()
+            now_ist = datetime.now(IST)
+            today_key = now_ist.strftime("%Y-%m-%d")
+            target_wd = int(settings.get("reminder_weekday", 0))
+            target_hr = int(settings.get("reminder_hour_ist", 9))
+            if now_ist.weekday() == target_wd and now_ist.hour == target_hr:
+                state = await db.scheduler_state.find_one({"id": "reminders"}, {"_id": 0})
+                if not state or state.get("last_fired_date") != today_key:
+                    count = await _create_reminders_for_pending()
+                    await db.scheduler_state.update_one(
+                        {"id": "reminders"},
+                        {"$set": {"id": "reminders", "last_fired_date": today_key, "last_fired_at": now_utc_iso(), "last_count": count}},
+                        upsert=True,
+                    )
+                    logging.getLogger(__name__).info(f"Weekly reminders fired at IST {now_ist.isoformat()} for {count} payment(s).")
         except Exception as e:
-            logging.getLogger(__name__).warning(f"Reminder loop error: {e}")
-        await asyncio.sleep(3600)  # every hour
+            logging.getLogger(__name__).warning(f"Scheduler loop error: {e}")
+        await asyncio.sleep(300)  # 5 minutes
+
+
+# Backwards-compatible alias for older startup hook
+reminder_loop = scheduler_loop
 
 
 # -------------------- APP SETUP --------------------
@@ -623,6 +752,8 @@ logger = logging.getLogger(__name__)
 async def on_startup():
     await db.otps.create_index("created_at", expireAfterSeconds=600)
     await seed_demo_data()
+    await get_settings_doc()
+    asyncio.create_task(scheduler_loop())
     logger.info("RideLease backend ready.")
 
 

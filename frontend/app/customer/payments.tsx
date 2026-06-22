@@ -27,11 +27,12 @@ export default function PaymentsScreen() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const pending = payments.filter((p) => p.status === "pending");
-  const pendingTotal = pending.reduce((s, p) => s + Number(p.amount), 0);
+  const pendingTotal = pending.reduce((s, p) => s + Number(p.amount) + Number(p.late_fee || 0), 0);
 
   const openUpi = async (p: Payment) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const url = `upi://pay?pa=${encodeURIComponent(MERCHANT_VPA)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${p.amount}&tn=${encodeURIComponent("Weekly Rent " + p.id.slice(0, 6))}&cu=INR`;
+    const total = Number(p.amount) + Number(p.late_fee || 0);
+    const url = `upi://pay?pa=${encodeURIComponent(MERCHANT_VPA)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${total}&tn=${encodeURIComponent("Weekly Rent " + p.id.slice(0, 6))}&cu=INR`;
     setActivePay(p);
     setTxn("");
     if (Platform.OS !== "web") {
@@ -86,24 +87,33 @@ export default function PaymentsScreen() {
             <Text style={styles.emptyBody}>Once you start rental, your weekly payments will appear here.</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <View style={[styles.row, shadow.card]} testID={`payment-${item.id}`}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.amount}>₹{Number(item.amount).toFixed(0)}</Text>
-              <Text style={styles.metaText}>
-                {item.status === "paid"
-                  ? `Paid ${new Date(item.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`
-                  : `Due ${new Date(item.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}
-              </Text>
-              {item.transaction_id && <Text style={styles.txn}>Txn: {item.transaction_id}</Text>}
+        renderItem={({ item }) => {
+          const fee = Number(item.late_fee || 0);
+          const total = Number(item.amount) + fee;
+          return (
+            <View style={[styles.row, shadow.card]} testID={`payment-${item.id}`}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.amount}>₹{total.toFixed(0)}</Text>
+                {fee > 0 && (
+                  <Text style={styles.feeBreak} testID={`fee-break-${item.id}`}>
+                    ₹{Number(item.amount).toFixed(0)} rent + <Text style={{ color: colors.error, fontWeight: "700" }}>₹{fee.toFixed(0)} late fee</Text>
+                  </Text>
+                )}
+                <Text style={styles.metaText}>
+                  {item.status === "paid"
+                    ? `Paid ${new Date(item.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`
+                    : `Due ${new Date(item.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}
+                </Text>
+                {item.transaction_id && <Text style={styles.txn}>Txn: {item.transaction_id}</Text>}
+              </View>
+              <View style={[styles.statusChip, { backgroundColor: item.status === "paid" ? colors.brandSecondary : (fee > 0 ? colors.error + "22" : colors.warning + "22") }]}>
+                <Text style={[styles.statusChipText, { color: item.status === "paid" ? colors.onBrandSecondary : (fee > 0 ? colors.error : colors.warning) }]}>
+                  {item.status === "paid" ? "Paid" : (fee > 0 ? "Overdue" : "Pending")}
+                </Text>
+              </View>
             </View>
-            <View style={[styles.statusChip, { backgroundColor: item.status === "paid" ? colors.brandSecondary : colors.warning + "22" }]}>
-              <Text style={[styles.statusChipText, { color: item.status === "paid" ? colors.onBrandSecondary : colors.warning }]}>
-                {item.status === "paid" ? "Paid" : "Pending"}
-              </Text>
-            </View>
-          </View>
-        )}
+          );
+        }}
       />
 
       <Modal visible={!!activePay} transparent animationType="slide" onRequestClose={() => setActivePay(null)}>
@@ -154,6 +164,7 @@ const styles = StyleSheet.create({
   amount: { fontSize: type.xl, fontWeight: "700", color: colors.onSurface },
   metaText: { color: colors.onSurfaceSecondary, marginTop: 2, fontSize: type.sm },
   txn: { color: colors.onSurfaceSecondary, marginTop: 2, fontSize: type.sm },
+  feeBreak: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 2 },
   statusChip: { paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.pill },
   statusChipText: { fontWeight: "700", fontSize: type.sm },
   emptyCard: { alignItems: "center", padding: spacing.xxl, gap: spacing.sm },

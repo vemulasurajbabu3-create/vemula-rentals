@@ -19,6 +19,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="payments" options={{ title: "Payments", tabBarButtonTestID: "tab-admin-payments", tabBarIcon: ({ color, size }) => <Ionicons name="cash" size={size} color={color} /> }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarButtonTestID: "tab-admin-more", tabBarIcon: ({ color, size }) => <Ionicons name="ellipsis-horizontal-circle" size={size} color={color} /> }} />
       <Tabs.Screen name="map" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
     </Tabs>
   );
 }
