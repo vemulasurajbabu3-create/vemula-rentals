@@ -1,22 +1,36 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "RideLease",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "ridelease",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Share your live location for rental tracking",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Share your live location for rental tracking",
+        "NSPhotoLibraryUsageDescription": "Upload your KYC documents",
+        "NSCameraUsageDescription": "Capture document photos for KYC",
+        "UIBackgroundModes": ["location", "fetch"]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -25,6 +39,21 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow RideLease to use your location for rental tracking.",
+          "locationWhenInUsePermission": "Allow RideLease to use your location for rental tracking.",
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow RideLease to access your photos to upload KYC documents.",
+          "cameraPermission": "Allow RideLease to access your camera to capture documents."
+        }
+      ],
       [
         "expo-splash-screen",
         {
