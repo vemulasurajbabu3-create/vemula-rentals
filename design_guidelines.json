@@ -1,0 +1,160 @@
+{
+  "app_name": "RideLease",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A trustworthy, clean, and structured interface that balances fintech-level clarity for payments with a premium mobility feel.",
+  "color": {
+    "surface": "#FDFDFD",
+    "onSurface": "#1A1C1A",
+    "surfaceSecondary": "#F4F5F4",
+    "onSurfaceSecondary": "#4A4D4A",
+    "surfaceTertiary": "#EAECEA",
+    "onSurfaceTertiary": "#2E302E",
+    "surfaceInverse": "#1A1C1A",
+    "onSurfaceInverse": "#FDFDFD",
+    "brand": "#2B5B3E",
+    "brandPrimary": "#2B5B3E",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#DCE8E0",
+    "onBrandSecondary": "#1F422C",
+    "brandTertiary": "#EAF2ED",
+    "onBrandTertiary": "#2B5B3E",
+    "success": "#287D3C",
+    "onSuccess": "#FFFFFF",
+    "warning": "#B96D0F",
+    "onWarning": "#FFFFFF",
+    "error": "#D14343",
+    "onError": "#FFFFFF",
+    "border": "#E1E3E1",
+    "borderStrong": "#BFC2BF",
+    "divider": "#EEF0EE"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous padding around content. Clear grouping. Use large bottom padding when scrolling behind a sticky button.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Bottom tab bar",
+      "Sticky header backgrounds over scrolling content",
+      "Floating Action Buttons"
+    ],
+    "dont's": [
+      "Form fields",
+      "List rows",
+      "Body content",
+      "Every card"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Customer Home",
+      "purpose": "A dashboard focusing on the two main things a renter cares about: their current vehicle and their payment status.",
+      "states": {
+        "loading": "Skeleton loaders for the payment card and vehicle card.",
+        "empty": "No active rental state: Illustration of a scooter with a 'You don't have an active rental' message and contact support CTA.",
+        "error": "Failed to load dashboard data. Retry button centered."
+      },
+      "layout": "Vertical scroll. Top section: Weekly Payment Status card (Fintech pattern: large pending amount, due date, progress bar, and primary 'Pay Now' CTA). Middle section: Assigned Vehicle card (features the scooter image, license plate, battery/status, and 'View instructions' action). Bottom section: Recent Notifications list."
+    },
+    {
+      "name": "Vehicle Page",
+      "purpose": "Provides detailed information and usage instructions for the assigned vehicle.",
+      "states": {
+        "loading": "Spinner centered.",
+        "empty": "N/A - User shouldn't reach here without a vehicle.",
+        "error": "Failed to load vehicle details. Retry button."
+      },
+      "layout": "Hero layout. Top: Large edge-to-edge image of the scooter with a bottom-to-top gradient scrim. Content overlaps the bottom of the image with the Vehicle Name and Plate. Below: Specifications grid (2 columns) and a step-by-step 'How to Use' list."
+    },
+    {
+      "name": "Payment Page",
+      "purpose": "Shows complete payment history and allows users to settle any pending weekly dues via UPI.",
+      "states": {
+        "loading": "Skeleton list rows.",
+        "empty": "Illustration of receipt. 'No payment history yet.'",
+        "error": "Failed to load payments. Retry button."
+      },
+      "layout": "Sticky top pending balance banner (if any dues exist). List of transactions grouped by month below. Each row shows Amount, Date, Status Chip (Paid/Pending/Failed), and Transaction ID. Floating Action Button for 'Quick Pay' if pending."
+    },
+    {
+      "name": "Documents Page",
+      "purpose": "Allows users to upload and view required verification documents.",
+      "states": {
+        "loading": "Skeleton grid.",
+        "empty": "Empty dashed bordered box to upload the first document.",
+        "error": "Failed to load documents."
+      },
+      "layout": "Grid of uploaded document cards. Each card shows document type and verification status chip. A large primary button at the bottom to 'Upload New Document'."
+    },
+    {
+      "name": "Admin Dashboard",
+      "purpose": "A command center for the business to monitor the fleet and user payments.",
+      "states": {
+        "loading": "Spinner.",
+        "empty": "No active data.",
+        "error": "Failed to load admin stats."
+      },
+      "layout": "Grid of 4 top-level metric cards (Total Vehicles, Active Users, Pending Payments, Total Earned). Below: Quick action list rows (Manage Vehicles, Manage Users, Review Documents, Send Notification). Uses standard iOS list pattern with chevrons."
+    }
+  ],
+  "images": {
+    "vehicle_hero": {
+      "url": "https://images.pexels.com/photos/16498803/pexels-photo-16498803.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Modern electric scooter parked on an urban street"
+    },
+    "payment_empty": {
+      "url": "https://images.pexels.com/photos/7680361/pexels-photo-7680361.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Shopping receipts and cash on a white background"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Follow 1 iOS-Native Clean personality strictly. Emphasize generous padding and structural clarity, avoiding clutter.",
+    "BANNED: Do not use any blue, indigo, violet, or purple colors. Rely entirely on the provided Moss Green brand palette and neutral grays/blacks.",
+    "Ensure the 'Weekly Payment Status' card on the Home screen uses fintech layout patterns: large monetary figures, clear status chips, and an obvious CTA.",
+    "For all images that overlap text (like the Vehicle hero image), apply a strict vertical gradient scrim (from transparent to at least 70% surfaceInverse) to ensure text contrast.",
+    "Use Phosphor icons with consistent weight (either all outlined or all filled, except bottom tabs which can switch on active state).",
+    "Do not use generic emoji for icons. Rely on the Phosphor icon set.",
+    "Keep navigation clear: Customer and Admin spaces should be completely separated by stack navigation post-login, with Customer getting bottom tabs.",
+    "Implement haptics on primary actions like 'Pay Now' or submitting documents.",
+    "Ensure 'Pay Now' buttons remain sticky at the bottom of the screen when appropriate, with proper safe-area padding."
+  ]
+}
