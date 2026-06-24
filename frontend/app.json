@@ -13,8 +13,10 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Share your live location for rental tracking",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Share your live location for rental tracking",
-        "NSPhotoLibraryUsageDescription": "Upload your KYC documents",
-        "NSCameraUsageDescription": "Capture document photos for KYC",
+        "NSPhotoLibraryUsageDescription": "Upload your KYC documents and vehicle photos",
+        "NSCameraUsageDescription": "Capture document and vehicle photos or videos",
+        "NSMicrophoneUsageDescription": "Record audio for vehicle inspection videos",
+        "NSContactsUsageDescription": "Pick an emergency contact for your rental account",
         "UIBackgroundModes": ["location", "fetch"]
       }
     },
@@ -29,7 +31,11 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "READ_MEDIA_IMAGES",
-        "READ_EXTERNAL_STORAGE"
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_CONTACTS"
       ]
     },
     "web": {
@@ -50,8 +56,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Vemula Rentals to access your photos to upload KYC documents.",
-          "cameraPermission": "Allow Vemula Rentals to access your camera to capture documents."
+          "photosPermission": "Allow Vemula Rentals to access your photos to upload KYC documents and vehicle photos.",
+          "cameraPermission": "Allow Vemula Rentals to access your camera to capture documents and vehicle photos or videos.",
+          "microphonePermission": "Allow Vemula Rentals to access your microphone to record vehicle inspection videos."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Vemula Rentals to access contacts to set an emergency contact."
         }
       ],
       [

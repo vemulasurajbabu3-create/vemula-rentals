@@ -30,27 +30,55 @@ export default function DocumentsScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const uploadFor = async (docType: string) => {
+  const uploadFor = async (docType: string, source: "camera" | "gallery", media: "image" | "video" = "image") => {
     setPickerOpen(false);
     setUploading(true);
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { setUploading(false); return; }
-      // Prefer image picker for photos, fallback to document picker
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
-        quality: 0.6,
-        base64: true,
-      });
+      let res: any;
+      if (source === "camera") {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) { setUploading(false); return; }
+        res = await ImagePicker.launchCameraAsync({
+          mediaTypes: media === "video" ? "videos" : "images",
+          quality: 0.6,
+          videoMaxDuration: 30,
+          base64: media === "image",
+        });
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) { setUploading(false); return; }
+        res = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: media === "video" ? "videos" : "images",
+          quality: 0.6,
+          videoMaxDuration: 30,
+          base64: media === "image",
+        });
+      }
       if (res.canceled || !res.assets?.[0]) { setUploading(false); return; }
       const a = res.assets[0];
-      const b64 = a.base64 ? `data:${a.mimeType || "image/jpeg"};base64,${a.base64}` : "";
-      if (!b64) { setUploading(false); return; }
-      await api("/documents", { method: "POST", body: { doc_type: docType, name: a.fileName || `${docType}-${Date.now()}.jpg`, base64_data: b64, mime_type: a.mimeType || "image/jpeg" } });
+      let b64 = "";
+      if (a.base64 && media === "image") {
+        b64 = `data:${a.mimeType || "image/jpeg"};base64,${a.base64}`;
+      } else {
+        // Fetch and convert to base64 (videos or no base64 in result)
+        const r = await fetch(a.uri);
+        const blob = await r.blob();
+        b64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+      const name = a.fileName || `${docType}-${Date.now()}.${media === "video" ? "mp4" : "jpg"}`;
+      const mime = a.mimeType || (media === "video" ? "video/mp4" : "image/jpeg");
+      await api("/documents", { method: "POST", body: { doc_type: docType, name, base64_data: b64, mime_type: mime } });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       await load();
     } catch {} finally { setUploading(false); }
   };
+
+  const [activeDocType, setActiveDocType] = useState<string | null>(null);
 
   const uploadPdf = async () => {
     setPickerOpen(false);
@@ -137,20 +165,51 @@ export default function DocumentsScreen() {
         <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(false)}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Choose document type</Text>
-            {DOC_TYPES.map((t) => (
-              <Pressable key={t.key} testID={`pick-${t.key}`} onPress={() => uploadFor(t.key)} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
-                <View style={styles.docIcon}><Ionicons name={t.icon as any} size={22} color={colors.brandPrimary} /></View>
-                <Text style={styles.typeLabel}>{t.label}</Text>
-                <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
-              </Pressable>
-            ))}
-            {Platform.OS !== "web" && (
-              <Pressable testID="pick-pdf" onPress={uploadPdf} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
-                <View style={styles.docIcon}><Ionicons name="document-attach-outline" size={22} color={colors.brandPrimary} /></View>
-                <Text style={styles.typeLabel}>Upload PDF (Agreement)</Text>
-                <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
-              </Pressable>
+            {!activeDocType ? (
+              <>
+                <Text style={styles.sheetTitle}>Choose document type</Text>
+                {DOC_TYPES.map((t) => (
+                  <Pressable key={t.key} testID={`pick-${t.key}`} onPress={() => setActiveDocType(t.key)} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
+                    <View style={styles.docIcon}><Ionicons name={t.icon as any} size={22} color={colors.brandPrimary} /></View>
+                    <Text style={styles.typeLabel}>{t.label}</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
+                  </Pressable>
+                ))}
+                {Platform.OS !== "web" && (
+                  <Pressable testID="pick-pdf" onPress={uploadPdf} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
+                    <View style={styles.docIcon}><Ionicons name="document-attach-outline" size={22} color={colors.brandPrimary} /></View>
+                    <Text style={styles.typeLabel}>Upload PDF (Agreement)</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
+                  </Pressable>
+                )}
+              </>
+            ) : (
+              <>
+                <Pressable onPress={() => setActiveDocType(null)} style={{ alignSelf: "flex-start", padding: spacing.xs, marginBottom: spacing.sm }}>
+                  <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
+                </Pressable>
+                <Text style={styles.sheetTitle}>Add {DOC_TYPES.find((t) => t.key === activeDocType)?.label || activeDocType}</Text>
+                <Pressable testID="source-camera-photo" onPress={() => { uploadFor(activeDocType, "camera", "image"); setActiveDocType(null); }} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
+                  <View style={styles.docIcon}><Ionicons name="camera" size={22} color={colors.brandPrimary} /></View>
+                  <Text style={styles.typeLabel}>Take Photo</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
+                </Pressable>
+                <Pressable testID="source-camera-video" onPress={() => { uploadFor(activeDocType, "camera", "video"); setActiveDocType(null); }} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
+                  <View style={styles.docIcon}><Ionicons name="videocam" size={22} color={colors.brandPrimary} /></View>
+                  <Text style={styles.typeLabel}>Record Video</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
+                </Pressable>
+                <Pressable testID="source-gallery-photo" onPress={() => { uploadFor(activeDocType, "gallery", "image"); setActiveDocType(null); }} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
+                  <View style={styles.docIcon}><Ionicons name="image" size={22} color={colors.brandPrimary} /></View>
+                  <Text style={styles.typeLabel}>Pick Photo from Gallery</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
+                </Pressable>
+                <Pressable testID="source-gallery-video" onPress={() => { uploadFor(activeDocType, "gallery", "video"); setActiveDocType(null); }} style={({ pressed }) => [styles.typeRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
+                  <View style={styles.docIcon}><Ionicons name="film" size={22} color={colors.brandPrimary} /></View>
+                  <Text style={styles.typeLabel}>Pick Video from Gallery</Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
+                </Pressable>
+              </>
             )}
           </Pressable>
         </Pressable>

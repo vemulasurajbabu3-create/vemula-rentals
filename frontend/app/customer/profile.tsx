@@ -1,8 +1,9 @@
 import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, ActivityIndicator, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Contacts from "expo-contacts";
 import { api, clearAuth } from "@/src/api/client";
 import BusinessContact from "@/src/components/BusinessContact";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
@@ -12,6 +13,8 @@ export default function Profile() {
   const [profile, setProfile] = useState<any | null>(null);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [emName, setEmName] = useState("");
+  const [emPhone, setEmPhone] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -21,6 +24,8 @@ export default function Profile() {
       setProfile(p);
       setName(p.full_name || "");
       setAddress(p.address || "");
+      setEmName(p.emergency_contact_name || "");
+      setEmPhone(p.emergency_contact_phone || "");
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -29,9 +34,25 @@ export default function Profile() {
   const save = async () => {
     setSaving(true);
     try {
-      await api("/users/me", { method: "PUT", body: { full_name: name, address } });
+      await api("/users/me", { method: "PUT", body: {
+        full_name: name, address,
+        emergency_contact_name: emName, emergency_contact_phone: emPhone,
+      } });
       await load();
     } catch {} finally { setSaving(false); }
+  };
+
+  const pickContact = async () => {
+    if (Platform.OS === "web") { alert("Contact picker is available in the mobile app."); return; }
+    try {
+      const perm = await Contacts.requestPermissionsAsync();
+      if (perm.status !== "granted") return;
+      const c = await Contacts.presentContactPickerAsync();
+      if (!c) return;
+      const phones = (c.phoneNumbers || []).map((p: any) => p?.number || "").filter(Boolean);
+      setEmName(c.name || `${c.firstName || ""} ${c.lastName || ""}`.trim());
+      setEmPhone((phones[0] || "").replace(/\D/g, "").slice(-10) || phones[0] || "");
+    } catch (e: any) { console.warn(e?.message); }
   };
 
   const logout = async () => {
@@ -72,6 +93,19 @@ export default function Profile() {
           </Pressable>
         </View>
 
+        <Text style={styles.section}>Emergency Contact</Text>
+        <View style={[styles.formCard, shadow.card]}>
+          <Text style={styles.label}>Contact Name</Text>
+          <TextInput testID="em-name-input" value={emName} onChangeText={setEmName} placeholder="e.g. Anjali" placeholderTextColor={colors.onSurfaceSecondary} style={styles.input} />
+          <View style={styles.divider} />
+          <Text style={styles.label}>Contact Phone</Text>
+          <TextInput testID="em-phone-input" value={emPhone} onChangeText={(t) => setEmPhone(t.replace(/\D/g, "").slice(0, 15))} placeholder="98765 43210" placeholderTextColor={colors.onSurfaceSecondary} keyboardType="phone-pad" style={styles.input} />
+          <Pressable testID="pick-contact-button" onPress={pickContact} style={({ pressed }) => [styles.pickContactBtn, pressed && { opacity: 0.85 }]}>
+            <Ionicons name="people" size={18} color={colors.brandPrimary} />
+            <Text style={styles.pickContactText}>Pick from Contacts</Text>
+          </Pressable>
+        </View>
+
         <Pressable testID="logout-button" onPress={logout} style={({ pressed }) => [styles.logoutRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
           <Ionicons name="log-out-outline" size={22} color={colors.error} />
           <Text style={styles.logoutText}>Log out</Text>
@@ -101,4 +135,6 @@ const styles = StyleSheet.create({
   saveText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.base },
   logoutRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, marginTop: spacing.xl, borderRadius: radius.md },
   logoutText: { color: colors.error, fontWeight: "700", fontSize: type.base },
+  pickContactBtn: { marginTop: spacing.md, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  pickContactText: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.base },
 });

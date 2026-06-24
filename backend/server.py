@@ -53,19 +53,23 @@ class TokenOut(BaseModel):
     status: str = "approved"
 
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    address: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+
+
 class UserProfile(BaseModel):
     id: str
     phone: str
     full_name: Optional[str] = None
     address: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
     is_admin: bool = False
     status: str = "approved"  # pending | approved | rejected
     created_at: str
-
-
-class UserUpdate(BaseModel):
-    full_name: Optional[str] = None
-    address: Optional[str] = None
 
 
 class LocationIn(BaseModel):
@@ -336,7 +340,10 @@ async def business_info():
 async def get_me(user: dict = Depends(current_user)):
     return UserProfile(**{
         "id": user["id"], "phone": user["phone"], "full_name": user.get("full_name"),
-        "address": user.get("address"), "is_admin": user.get("is_admin", False),
+        "address": user.get("address"),
+        "emergency_contact_name": user.get("emergency_contact_name"),
+        "emergency_contact_phone": user.get("emergency_contact_phone"),
+        "is_admin": user.get("is_admin", False),
         "status": user.get("status", "approved"),
         "created_at": user["created_at"],
     })
@@ -350,7 +357,10 @@ async def update_me(body: UserUpdate, user: dict = Depends(current_user)):
     u = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return UserProfile(**{
         "id": u["id"], "phone": u["phone"], "full_name": u.get("full_name"),
-        "address": u.get("address"), "is_admin": u.get("is_admin", False),
+        "address": u.get("address"),
+        "emergency_contact_name": u.get("emergency_contact_name"),
+        "emergency_contact_phone": u.get("emergency_contact_phone"),
+        "is_admin": u.get("is_admin", False),
         "status": u.get("status", "approved"),
         "created_at": u["created_at"],
     })
@@ -869,7 +879,9 @@ async def admin_update_settings(body: SettingsUpdate, _: dict = Depends(admin_re
 
 # -------------------- SEED --------------------
 async def seed_demo_data():
-    """Seed a small demo dataset on first boot."""
+    """Seed a small demo dataset. Disabled by default - set SEED_DEMO=true to enable."""
+    if os.environ.get("SEED_DEMO", "false").lower() not in ("1", "true", "yes"):
+        return
     count = await db.vehicles.count_documents({})
     if count > 0:
         return

@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
@@ -123,6 +124,27 @@ function VehicleSheet({ visible, initial, onClose, onSaved }: { visible: boolean
             <Field label="Weekly Rent (₹)" value={rent} onChange={setRent} testID="field-rent" keyboardType="numeric" />
             <Field label="Security Deposit (₹)" value={deposit} onChange={setDeposit} testID="field-deposit" keyboardType="numeric" />
             <Field label="Image URL (optional)" value={imageUrl} onChange={setImageUrl} testID="field-image" />
+            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: -spacing.sm, marginBottom: spacing.md }}>
+              <Pressable testID="vehicle-photo-camera" onPress={async () => {
+                const perm = await ImagePicker.requestCameraPermissionsAsync();
+                if (!perm.granted) return;
+                const r = await ImagePicker.launchCameraAsync({ mediaTypes: "images", quality: 0.5, base64: true });
+                if (!r.canceled && r.assets?.[0]?.base64) setImageUrl(`data:${r.assets[0].mimeType || "image/jpeg"};base64,${r.assets[0].base64}`);
+              }} style={({ pressed }) => [styles.photoBtn, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="camera" size={16} color={colors.brandPrimary} />
+                <Text style={styles.photoBtnText}>Camera</Text>
+              </Pressable>
+              <Pressable testID="vehicle-photo-gallery" onPress={async () => {
+                const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (!perm.granted) return;
+                const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.5, base64: true });
+                if (!r.canceled && r.assets?.[0]?.base64) setImageUrl(`data:${r.assets[0].mimeType || "image/jpeg"};base64,${r.assets[0].base64}`);
+              }} style={({ pressed }) => [styles.photoBtn, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="image" size={16} color={colors.brandPrimary} />
+                <Text style={styles.photoBtnText}>Gallery</Text>
+              </Pressable>
+            </View>
+            {imageUrl ? <Image source={{ uri: imageUrl }} style={{ width: "100%", height: 140, borderRadius: 12, marginBottom: spacing.md }} contentFit="cover" /> : null}
             <Field label="Instructions (one per line)" value={instructions} onChange={setInstructions} testID="field-instructions" multiline />
             <Pressable testID="save-vehicle-button" onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.85 }, saving && { opacity: 0.5 }]}>
               {saving ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.saveText}>{initial ? "Save Changes" : "Create Vehicle"}</Text>}
@@ -182,4 +204,6 @@ const styles = StyleSheet.create({
   saveText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.lg },
   cancelBtn: { height: 44, alignItems: "center", justifyContent: "center", marginTop: spacing.xs },
   cancelText: { color: colors.onSurfaceSecondary, fontWeight: "600" },
+  photoBtn: { flex: 1, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  photoBtnText: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.sm },
 });
