@@ -227,6 +227,34 @@ class ForfeitIn(BaseModel):
     reason: str
 
 
+class Booking(BaseModel):
+    id: str
+    user_id: str
+    vehicle_id: str
+    vehicle_snapshot: dict = {}  # model, number_plate, vehicle_type, weekly_rent, security_deposit
+    start_date: str
+    end_date: Optional[str] = None
+    status: str  # active | return_requested | returned | cancelled
+    return_requested_at: Optional[str] = None
+    customer_notes: Optional[str] = None
+    returned_at: Optional[str] = None
+    admin_notes: Optional[str] = None
+    refund_amount: Optional[float] = None
+    total_rent_paid: Optional[float] = None
+    deposit_paid: Optional[float] = None
+    deposit_refunded: Optional[float] = None
+    created_at: str
+
+
+class ReturnRequestIn(BaseModel):
+    notes: Optional[str] = None
+
+
+class ConfirmReturnIn(BaseModel):
+    refund_amount: float
+    notes: Optional[str] = None
+
+
 # -------------------- AUTH HELPERS --------------------
 def create_token(user_id: str, phone: str, is_admin: bool) -> str:
     payload = {
@@ -453,6 +481,32 @@ async def assign_vehicle(body: AssignIn, _: dict = Depends(admin_required)):
         {"id": body.vehicle_id},
         {"$set": {"assigned_to": body.user_id, "status": "rented", "rental_start_date": start}},
     )
+    # Create a Booking record for this rental period
+    booking = {
+        "id": str(uuid.uuid4()),
+        "user_id": body.user_id,
+        "vehicle_id": body.vehicle_id,
+        "vehicle_snapshot": {
+            "model": veh.get("model"),
+            "number_plate": veh.get("number_plate"),
+            "vehicle_type": veh.get("vehicle_type"),
+            "weekly_rent": float(veh.get("weekly_rent", 0)),
+            "security_deposit": float(veh.get("security_deposit", 0)),
+        },
+        "start_date": start,
+        "end_date": None,
+        "status": "active",
+        "return_requested_at": None,
+        "customer_notes": None,
+        "returned_at": None,
+        "admin_notes": None,
+        "refund_amount": None,
+        "total_rent_paid": None,
+        "deposit_paid": None,
+        "deposit_refunded": None,
+        "created_at": now_utc_iso(),
+    }
+    await db.bookings.insert_one(dict(booking))
     # Tag deposits for cleaner forfeit tracking
     await db.deposits.update_many(
         {"user_id": body.user_id, "status": "paid", "vehicle_id": None},
@@ -1000,6 +1054,224 @@ async def _compute_late_fees_once():
                     "body": f"Your vehicle has been suspended due to overdue payment (#{p['id'][:8]}). Please clear dues to resume.",
                     "read": False, "created_at": now_utc_iso(),
                 })
+
+
+# -------------------- BOOKING ROUTES --------------------
+async def _booking_to_dict(b: dict) -> dict:
+    b = dict(b)
+    b.pop("_id", None)
+    return b
+
+
+async def _get_active_booking_for_user(user_id: str) -> Optional[dict]:
+    """Return the user's currently active or return-requested booking, if any."""
+    b = await db.bookings.find_one(
+        {"user_id": user_id, "status": {"$in": ["active", "return_requested"]}},
+        {"_id": 0},
+    )
+    return b
+
+
+@api_router.get("/bookings/me")
+async def my_bookings(user: dict = Depends(approved_user)):
+    items = await db.bookings.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return items
+
+
+@api_router.post("/bookings/me/request-return")
+async def request_return(body: ReturnRequestIn, user: dict = Depends(approved_user)):
+    active = await db.bookings.find_one({"user_id": user["id"], "status": "active"}, {"_id": 0})
+    if not active:
+        raise HTTPException(status_code=404, detail="No active rental to return")
+    await db.bookings.update_one(
+        {"id": active["id"]},
+        {"$set": {
+            "status": "return_requested",
+            "return_requested_at": now_utc_iso(),
+            "customer_notes": (body.notes or "").strip() or None,
+        }},
+    )
+    veh = await db.vehicles.find_one({"id": active["vehicle_id"]}, {"_id": 0})
+    veh_text = f"{veh['model']} ({veh['number_plate']})" if veh else "vehicle"
+    rider = user.get("full_name") or user.get("phone") or "Rider"
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "user_id": None,
+        "title": "Return Requested",
+        "body": f"{rider} requested to return {veh_text}. Please confirm in Admin > Bookings.",
+        "read": False, "created_at": now_utc_iso(),
+    })
+    updated = await db.bookings.find_one({"id": active["id"]}, {"_id": 0})
+    return updated
+
+
+@api_router.post("/bookings/me/cancel-return")
+async def cancel_return_request(user: dict = Depends(approved_user)):
+    """Customer can cancel their return request before admin confirms."""
+    b = await db.bookings.find_one({"user_id": user["id"], "status": "return_requested"}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="No pending return request")
+    await db.bookings.update_one(
+        {"id": b["id"]},
+        {"$set": {"status": "active", "return_requested_at": None, "customer_notes": None}},
+    )
+    updated = await db.bookings.find_one({"id": b["id"]}, {"_id": 0})
+    return updated
+
+
+@api_router.get("/admin/bookings")
+async def admin_list_bookings(
+    status: Optional[str] = None,
+    user_id: Optional[str] = None,
+    _: dict = Depends(admin_required),
+):
+    query: dict = {}
+    if status:
+        query["status"] = status
+    if user_id:
+        query["user_id"] = user_id
+    items = await db.bookings.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return items
+
+
+@api_router.get("/admin/users/{uid}/bookings")
+async def admin_user_bookings(uid: str, _: dict = Depends(admin_required)):
+    items = await db.bookings.find({"user_id": uid}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return items
+
+
+@api_router.post("/admin/bookings/{bid}/confirm-return")
+async def admin_confirm_return(bid: str, body: ConfirmReturnIn, _: dict = Depends(admin_required)):
+    b = await db.bookings.find_one({"id": bid}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if b["status"] == "returned":
+        raise HTTPException(status_code=409, detail="Booking already returned")
+    if body.refund_amount < 0:
+        raise HTTPException(status_code=400, detail="refund_amount must be >= 0")
+
+    user_id = b["user_id"]
+    vehicle_id = b["vehicle_id"]
+
+    # Compute totals from existing data
+    paid_deposits = await db.deposits.find(
+        {"user_id": user_id, "status": "paid", "vehicle_id": vehicle_id},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(500)
+    deposit_paid = round(sum(float(d["amount"]) for d in paid_deposits), 2)
+
+    if body.refund_amount > deposit_paid + 0.001:
+        raise HTTPException(
+            status_code=412,
+            detail=f"Refund ₹{body.refund_amount:.0f} exceeds deposit balance ₹{deposit_paid:.0f} for this rental.",
+        )
+
+    paid_rents = await db.payments.find(
+        {"user_id": user_id, "vehicle_id": vehicle_id, "status": "paid"},
+        {"_id": 0},
+    ).to_list(500)
+    total_rent_paid = round(
+        sum(float(p["amount"]) + float(p.get("late_fee", 0.0)) for p in paid_rents),
+        2,
+    )
+
+    # Apply refund FIFO against paid deposits; remaining gets "forfeited" (deductions)
+    remaining_refund = float(body.refund_amount)
+    deductions_remaining = round(deposit_paid - body.refund_amount, 2)
+    for d in paid_deposits:
+        if remaining_refund <= 0 and deductions_remaining <= 0:
+            break
+        amt = float(d["amount"])
+        if remaining_refund >= amt - 0.001:
+            # Whole record refunded
+            await db.deposits.update_one(
+                {"id": d["id"]},
+                {"$set": {"status": "refunded", "refunded_amount": amt, "refunded_at": now_utc_iso()}},
+            )
+            remaining_refund = round(remaining_refund - amt, 2)
+            continue
+        if remaining_refund > 0:
+            # Split: refund `remaining_refund` portion; the rest stays "paid" temporarily for forfeit
+            refunded_part = remaining_refund
+            stays = round(amt - refunded_part, 2)
+            await db.deposits.update_one({"id": d["id"]}, {"$set": {"amount": stays}})
+            split = Deposit(
+                id=str(uuid.uuid4()), user_id=user_id, vehicle_id=vehicle_id,
+                amount=refunded_part, status="refunded",
+                transaction_id=d.get("transaction_id"), paid_at=d.get("paid_at"),
+                created_at=d["created_at"],
+            ).dict()
+            split["refunded_amount"] = refunded_part
+            split["refunded_at"] = now_utc_iso()
+            await db.deposits.insert_one(split)
+            remaining_refund = 0
+            amt = stays  # what's left to potentially forfeit on this record
+            if amt <= 0:
+                continue
+        # Remaining amount on this record is forfeited (admin's deductions)
+        if deductions_remaining >= amt - 0.001:
+            await db.deposits.update_one(
+                {"id": d["id"]},
+                {"$set": {
+                    "status": "forfeited",
+                    "forfeit_reason": (body.notes or "Return deductions"),
+                    "forfeit_at": now_utc_iso(),
+                }},
+            )
+            deductions_remaining = round(deductions_remaining - amt, 2)
+        elif deductions_remaining > 0:
+            # Shrink current record, create forfeit split
+            await db.deposits.update_one({"id": d["id"]}, {"$set": {"amount": round(amt - deductions_remaining, 2)}})
+            split = Deposit(
+                id=str(uuid.uuid4()), user_id=user_id, vehicle_id=vehicle_id,
+                amount=deductions_remaining, status="forfeited",
+                transaction_id=d.get("transaction_id"), paid_at=d.get("paid_at"),
+                forfeit_reason=(body.notes or "Return deductions"),
+                forfeit_at=now_utc_iso(),
+                created_at=d["created_at"],
+            )
+            await db.deposits.insert_one(split.dict())
+            deductions_remaining = 0
+
+    # Release the vehicle
+    await db.vehicles.update_one(
+        {"id": vehicle_id},
+        {"$set": {"assigned_to": None, "status": "available", "rental_start_date": None}},
+    )
+
+    # Cancel pending payments for this rental (future rent shouldn't be billed after return)
+    cancelled_count = (await db.payments.delete_many({
+        "user_id": user_id, "vehicle_id": vehicle_id, "status": "pending",
+    })).deleted_count
+
+    # Close the booking
+    now_iso = now_utc_iso()
+    await db.bookings.update_one(
+        {"id": bid},
+        {"$set": {
+            "status": "returned",
+            "end_date": now_iso,
+            "returned_at": now_iso,
+            "refund_amount": float(body.refund_amount),
+            "admin_notes": (body.notes or "").strip() or None,
+            "total_rent_paid": total_rent_paid,
+            "deposit_paid": deposit_paid,
+            "deposit_refunded": float(body.refund_amount),
+        }},
+    )
+
+    # Notify customer
+    veh = await db.vehicles.find_one({"id": vehicle_id}, {"_id": 0})
+    veh_text = f"{veh['model']} ({veh['number_plate']})" if veh else "vehicle"
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "user_id": user_id,
+        "title": "Return Confirmed",
+        "body": f"Your return of {veh_text} is confirmed. Refund: ₹{body.refund_amount:.0f}.",
+        "read": False, "created_at": now_utc_iso(),
+    })
+
+    updated = await db.bookings.find_one({"id": bid}, {"_id": 0})
+    updated["cancelled_pending_payments"] = cancelled_count
+    return updated
 
 
 # -------------------- WEEKLY REMINDER SCHEDULER --------------------

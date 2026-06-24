@@ -16,6 +16,7 @@ export default function CustomerLayout() {
       <Tabs.Screen name="home" options={{ title: "Home", tabBarButtonTestID: "tab-home", tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} /> }} />
       <Tabs.Screen name="vehicle" options={{ title: "Vehicle", tabBarButtonTestID: "tab-vehicle", tabBarIcon: ({ color, size }) => <Ionicons name="bicycle" size={size} color={color} /> }} />
       <Tabs.Screen name="payments" options={{ title: "Payments", tabBarButtonTestID: "tab-payments", tabBarIcon: ({ color, size }) => <Ionicons name="card" size={size} color={color} /> }} />
+      <Tabs.Screen name="history" options={{ title: "History", tabBarButtonTestID: "tab-history", tabBarIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} /> }} />
       <Tabs.Screen name="documents" options={{ title: "Docs", tabBarButtonTestID: "tab-documents", tabBarIcon: ({ color, size }) => <Ionicons name="document-text" size={size} color={color} /> }} />
       <Tabs.Screen name="profile" options={{ title: "Profile", tabBarButtonTestID: "tab-profile", tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} /> }} />
     </Tabs>

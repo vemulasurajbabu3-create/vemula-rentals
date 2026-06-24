@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform, Pressable, Linking } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform, Pressable, Linking, Modal, KeyboardAvoidingView, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,14 +11,44 @@ import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
 export default function VehicleScreen() {
   const [vehicle, setVehicle] = useState<any | null>(null);
+  const [booking, setBooking] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [notes, setNotes] = useState("");
   const player = useVideoPlayer(vehicle?.walk_around_video || "", (p) => { p.loop = false; });
 
-  useFocusEffect(useCallback(() => {
-    (async () => {
-      try { setVehicle(await api("/users/me/vehicle")); } catch {} finally { setLoading(false); }
-    })();
-  }, []));
+  const load = useCallback(async () => {
+    try {
+      const [v, bs] = await Promise.all([
+        api<any>("/users/me/vehicle"),
+        api<any[]>("/bookings/me").catch(() => []),
+      ]);
+      setVehicle(v);
+      const active = (bs || []).find((b: any) => b.status === "active" || b.status === "return_requested") || null;
+      setBooking(active);
+    } catch {} finally { setLoading(false); }
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const requestReturn = async () => {
+    setSubmitting(true);
+    try {
+      await api("/bookings/me/request-return", { method: "POST", body: { notes: notes.trim() || undefined } });
+      setShowModal(false);
+      setNotes("");
+      await load();
+    } catch {} finally { setSubmitting(false); }
+  };
+
+  const cancelReturn = async () => {
+    setSubmitting(true);
+    try {
+      await api("/bookings/me/cancel-return", { method: "POST", body: {} });
+      await load();
+    } catch {} finally { setSubmitting(false); }
+  };
 
   if (loading) {
     return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
@@ -96,8 +126,65 @@ export default function VehicleScreen() {
               )}
             </>
           ) : null}
+
+          <Text style={styles.sectionTitle}>Return Vehicle</Text>
+          {booking?.status === "return_requested" ? (
+            <View style={[styles.returnCard, shadow.card]} testID="return-pending-card">
+              <View style={styles.returnIconWrap}>
+                <Ionicons name="hourglass" size={22} color={colors.warning} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.returnTitle}>Return request submitted</Text>
+                <Text style={styles.returnBody}>The business will inspect your vehicle and confirm the deposit refund.</Text>
+                {booking.customer_notes ? (
+                  <Text style={styles.returnNote}>Your note: {booking.customer_notes}</Text>
+                ) : null}
+                <Pressable testID="cancel-return-button" onPress={cancelReturn} disabled={submitting} style={({ pressed }) => [styles.cancelReturnBtn, submitting && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}>
+                  <Text style={styles.cancelReturnText}>{submitting ? "Cancelling…" : "Cancel Request"}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Pressable
+              testID="request-return-button"
+              onPress={() => setShowModal(true)}
+              style={({ pressed }) => [styles.returnCta, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="swap-horizontal" size={18} color={colors.onBrandPrimary} />
+              <Text style={styles.returnCtaText}>Request to Return Vehicle</Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
+
+      <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
+          <View style={styles.sheet} testID="request-return-sheet">
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Return Vehicle</Text>
+            <Text style={styles.sheetSub}>Let the business know you’d like to return {vehicle.model}. They will inspect and confirm your deposit refund.</Text>
+            <Text style={styles.label}>Notes (optional)</Text>
+            <TextInput
+              testID="return-request-notes"
+              value={notes}
+              onChangeText={setNotes}
+              style={[styles.input, { minHeight: 90, textAlignVertical: "top" }]}
+              placeholder="Any details we should know — e.g. preferred handover time, fuel level, condition"
+              placeholderTextColor={colors.onSurfaceSecondary}
+              multiline
+            />
+            <Pressable
+              testID="submit-return-request"
+              onPress={requestReturn}
+              disabled={submitting}
+              style={({ pressed }) => [styles.submitBtn, submitting && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
+            >
+              {submitting ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.submitText}>Submit Return Request</Text>}
+            </Pressable>
+            <Pressable onPress={() => setShowModal(false)} style={styles.modalCancel}><Text style={styles.modalCancelText}>Cancel</Text></Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -139,4 +226,24 @@ const styles = StyleSheet.create({
   video: { width: "100%", height: 220, borderRadius: radius.lg, backgroundColor: "#000" },
   videoFallback: { padding: spacing.xl, borderRadius: radius.lg, backgroundColor: colors.surfaceTertiary, alignItems: "center", gap: spacing.sm },
   videoFallbackText: { color: colors.onSurface, fontWeight: "600" },
+  returnCta: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, backgroundColor: colors.brandPrimary, height: 52, borderRadius: radius.md, marginBottom: spacing.md },
+  returnCtaText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: type.base },
+  returnCard: { flexDirection: "row", gap: spacing.md, padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.warning + "12", borderWidth: 1, borderColor: colors.warning + "44", marginBottom: spacing.md },
+  returnIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.warning + "22", alignItems: "center", justifyContent: "center" },
+  returnTitle: { fontSize: type.lg, fontWeight: "800", color: colors.onSurface },
+  returnBody: { color: colors.onSurfaceSecondary, marginTop: 4, fontSize: type.sm, lineHeight: 18 },
+  returnNote: { color: colors.onSurface, fontSize: type.sm, marginTop: spacing.sm, fontStyle: "italic" },
+  cancelReturnBtn: { marginTop: spacing.md, alignSelf: "flex-start", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.warning },
+  cancelReturnText: { color: colors.warning, fontWeight: "700", fontSize: type.sm },
+  modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.4)" },
+  sheet: { backgroundColor: colors.surface, padding: spacing.xl, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: spacing.md },
+  sheetTitle: { fontSize: type.xl, fontWeight: "800", color: colors.onSurface },
+  sheetSub: { color: colors.onSurfaceSecondary, marginTop: 4, marginBottom: spacing.md, fontSize: type.base, lineHeight: 20 },
+  label: { fontSize: type.sm, color: colors.onSurfaceSecondary, marginBottom: spacing.xs },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, fontSize: type.base, color: colors.onSurface, backgroundColor: colors.surface },
+  submitBtn: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, height: 52, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+  submitText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.lg },
+  modalCancel: { height: 44, alignItems: "center", justifyContent: "center", marginTop: spacing.xs },
+  modalCancelText: { color: colors.onSurfaceSecondary, fontWeight: "600" },
 });

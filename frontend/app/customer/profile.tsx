@@ -106,6 +106,15 @@ export default function Profile() {
           </Pressable>
         </View>
 
+        <Pressable testID="history-link" onPress={() => router.push("/customer/history")} style={({ pressed }) => [styles.historyRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
+          <Ionicons name="time" size={22} color={colors.brandPrimary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.historyTitle}>Rental History</Text>
+            <Text style={styles.historySub}>View past and current bookings, deposits, and refunds</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.onSurfaceSecondary} />
+        </Pressable>
+
         <Pressable testID="logout-button" onPress={logout} style={({ pressed }) => [styles.logoutRow, pressed && { backgroundColor: colors.surfaceSecondary }]}>
           <Ionicons name="log-out-outline" size={22} color={colors.error} />
           <Text style={styles.logoutText}>Log out</Text>
@@ -137,4 +146,7 @@ const styles = StyleSheet.create({
   logoutText: { color: colors.error, fontWeight: "700", fontSize: type.base },
   pickContactBtn: { marginTop: spacing.md, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
   pickContactText: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.base },
+  historyRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg, marginTop: spacing.lg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.divider, backgroundColor: colors.surface },
+  historyTitle: { color: colors.onSurface, fontSize: type.base, fontWeight: "700" },
+  historySub: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 2 },
 });

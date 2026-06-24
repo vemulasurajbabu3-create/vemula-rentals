@@ -234,3 +234,76 @@ agent_communication:
           - Sanity: admin Add Vehicle modal has testID=field-deposit + vehicle-video-camera + vehicle-video-gallery; customer home renders location-banner.
         Screenshots: /app/test_reports/screens/10_deposit_card_shortfall.png, 11_deposit_card_paid.png, 12_admin_vehicle_modal.png.
         Report: /app/test_reports/iteration_3.json. Only optional nice-to-have: 'Credit Deposit' CTA in confirm sheet sits just below fold on 667px height — non-blocking.
+
+# ============= Iteration 4: Booking History + Vehicle Return =============
+
+backend_iter4:
+  - task: "POST /api/vehicles/assign creates an active Booking record"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+    priority: high
+    note: "Snapshot includes model, number_plate, vehicle_type, weekly_rent, security_deposit. Status active."
+  - task: "GET /api/bookings/me returns user's bookings"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+    priority: high
+  - task: "POST /api/bookings/me/request-return marks active booking as return_requested"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+    priority: high
+    note: "Stores customer_notes and broadcasts admin notification."
+  - task: "POST /api/bookings/me/cancel-return reverts to active"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+    priority: medium
+  - task: "GET /api/admin/bookings?status= lists bookings with filter"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+    priority: high
+  - task: "POST /api/admin/bookings/{bid}/confirm-return"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+    priority: high
+    note: |
+      Side effects:
+       - Vehicle released (assigned_to=null, status=available, rental_start_date=null).
+       - Deposits of user+vehicle marked 'refunded' up to refund_amount; the rest 'forfeited' with notes.
+       - Pending payments for that vehicle deleted.
+       - Booking gets totals (total_rent_paid, deposit_paid, deposit_refunded), end_date, returned_at.
+       - refund_amount > deposit_paid returns 412.
+
+frontend_iter4:
+  - task: "Customer Vehicle screen: 'Request Return' button + modal with notes"
+    file: "/app/frontend/app/customer/vehicle.tsx"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS (iter4) — request-return-button visible after assign+deposit; modal request-return-sheet opens; notes captured; return-pending-card with cancel-return-button appears; cancel reverts to active. Screenshot: it4_customer_vehicle.png."
+  - task: "Customer Rental History screen with deposit/refund details"
+    file: "/app/frontend/app/customer/history.tsx"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS (iter4) — tab-history visible; history-screen renders booking card; profile history-link present; after admin confirm-return, card flips to 'Returned' with deposit_paid/refunded/deductions row. Screenshots: it4_customer_history_active.png, it4_customer_history_returned.png."
+  - task: "Admin Bookings tab + Confirm Return modal with refund amount"
+    file: "/app/frontend/app/admin/bookings.tsx"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS (iter4) — tab-admin-bookings + 4 filter pills visible; pending return shown under Returns; confirm-return-sheet pre-fills security_deposit; refund=99999 → backend 412 and sheet stays open (no inline error toast though — optional improvement); refund=1500 → booking moves to Past with 'Refunded ₹1500 of ₹2000'. Screenshots: it4_admin_bookings_pending.jpg, it4_admin_bookings_returned.jpg."
+
+backend_iter4_results:
+  - task: "All 6 booking endpoints"
+    working: true
+    agent: "testing"
+    comment: "pytest /app/backend/tests/test_bookings_returns.py = 6/6 PASS. Covers assign→active booking creation, GET /bookings/me, request-return + cancel-return, admin filter, confirm-return success + 412 over-refund + vehicle released + deposits split (refunded 1500 / forfeited 500) + pending payments cleared. JUnit: /app/test_reports/pytest/bookings_results.xml."
+
+agent_communication_iter4:
+  - agent: "testing"
+    message: "Iteration 4 GREEN end-to-end. Backend 6/6 pytest pass; frontend customer + admin flows verified on 390x844. Only nice-to-have: surface inline error in confirm-return-sheet when backend returns 412 over-refund. No retest needed."
