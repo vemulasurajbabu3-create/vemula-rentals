@@ -29,8 +29,10 @@ export default function AdminBookings() {
   const [refreshing, setRefreshing] = useState(false);
   const [confirming, setConfirming] = useState<Booking | null>(null);
   const [refundAmt, setRefundAmt] = useState("");
+  const [damagesAmt, setDamagesAmt] = useState("");
   const [adminNote, setAdminNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -54,24 +56,32 @@ export default function AdminBookings() {
   const openConfirm = (b: Booking) => {
     const dep = Number(b.vehicle_snapshot?.security_deposit || 0);
     setRefundAmt(String(dep));
+    setDamagesAmt("0");
     setAdminNote("");
+    setErrorMsg(null);
     setConfirming(b);
   };
 
   const submitConfirm = async () => {
     if (!confirming) return;
-    const amt = Number(refundAmt);
-    if (Number.isNaN(amt) || amt < 0) return;
+    const refund = Number(refundAmt || 0);
+    const damages = Number(damagesAmt || 0);
+    if (!Number.isFinite(refund) || refund < 0 || !Number.isFinite(damages) || damages < 0) {
+      setErrorMsg("Amounts must be 0 or more.");
+      return;
+    }
     setSaving(true);
+    setErrorMsg(null);
     try {
       await api(`/admin/bookings/${confirming.id}/confirm-return`, {
         method: "POST",
-        body: { refund_amount: amt, notes: adminNote || undefined },
+        body: { refund_amount: refund, damages_amount: damages, notes: adminNote || undefined },
       });
       setConfirming(null);
       await load();
-    } catch {
-      // best-effort: leave modal open if error
+    } catch (err: any) {
+      const detail = err?.body?.detail ?? err?.message ?? "Could not confirm return.";
+      setErrorMsg(typeof detail === "string" ? detail : "Could not confirm return.");
     } finally { setSaving(false); }
   };
 
@@ -165,32 +175,71 @@ export default function AdminBookings() {
             <View style={styles.handle} />
             <Text style={styles.sheetTitle}>Confirm Return</Text>
             <Text style={styles.sheetSub}>{confirming?.vehicle_snapshot?.model} · {confirming?.vehicle_snapshot?.number_plate}</Text>
-            <Text style={styles.label}>Refund amount (₹)</Text>
-            <TextInput
-              testID="refund-amount-input"
-              value={refundAmt}
-              onChangeText={(t) => setRefundAmt(t.replace(/[^0-9.]/g, ""))}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g. 2000"
-              placeholderTextColor={colors.onSurfaceSecondary}
-            />
-            <Text style={styles.helper}>Deposit on file: ₹{Number(confirming?.vehicle_snapshot?.security_deposit || 0).toFixed(0)}. Any amount not refunded will be recorded as deductions.</Text>
+            {(() => {
+              const dep = Number(confirming?.vehicle_snapshot?.security_deposit || 0);
+              const r = Number(refundAmt || 0);
+              const dmg = Number(damagesAmt || 0);
+              const wallet = Math.max(0, dep - r - dmg);
+              const over = r + dmg > dep + 0.001;
+              return (
+                <>
+                  <Text style={styles.label}>Refund to rider (₹)</Text>
+                  <TextInput
+                    testID="refund-amount-input"
+                    value={refundAmt}
+                    onChangeText={(t) => { setRefundAmt(t.replace(/[^0-9.]/g, "")); setErrorMsg(null); }}
+                    keyboardType="numeric"
+                    style={styles.input}
+                    placeholder="e.g. 1500"
+                    placeholderTextColor={colors.onSurfaceSecondary}
+                  />
+                  <Text style={styles.label}>Damages / deductions (₹)</Text>
+                  <TextInput
+                    testID="damages-amount-input"
+                    value={damagesAmt}
+                    onChangeText={(t) => { setDamagesAmt(t.replace(/[^0-9.]/g, "")); setErrorMsg(null); }}
+                    keyboardType="numeric"
+                    style={styles.input}
+                    placeholder="0"
+                    placeholderTextColor={colors.onSurfaceSecondary}
+                  />
+                  <View style={styles.breakdownBox} testID="return-breakdown">
+                    <Row label="Deposit on file" value={`₹${dep.toFixed(0)}`} />
+                    <Row label="Refund to rider" value={`-₹${r.toFixed(0)}`} />
+                    <Row label="Damages (forfeit)" value={`-₹${dmg.toFixed(0)}`} />
+                    <View style={styles.divider} />
+                    <Row label="Stays in wallet" value={`₹${wallet.toFixed(0)}`} bold />
+                  </View>
+                  {over && (
+                    <Text style={styles.errorText} testID="over-allocation-warning">
+                      Refund + damages exceed the deposit. Reduce the amounts.
+                    </Text>
+                  )}
+                </>
+              );
+            })()}
             <Text style={styles.label}>Notes (optional)</Text>
             <TextInput
               testID="return-notes-input"
               value={adminNote}
               onChangeText={setAdminNote}
-              style={[styles.input, { minHeight: 72, textAlignVertical: "top" }]}
+              style={[styles.input, { minHeight: 64, textAlignVertical: "top" }]}
               multiline
-              placeholder="e.g. Minor scratch on rear panel; \u20b9500 deducted."
+              placeholder="e.g. Minor scratch on rear panel; ₹500 deducted."
               placeholderTextColor={colors.onSurfaceSecondary}
             />
+            {errorMsg ? (
+              <Text style={styles.errorText} testID="confirm-return-error">{errorMsg}</Text>
+            ) : null}
             <Pressable
               testID="submit-confirm-return"
               onPress={submitConfirm}
-              disabled={saving || refundAmt === ""}
-              style={({ pressed }) => [styles.confirmBtn, (saving || refundAmt === "") && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
+              disabled={saving || refundAmt === "" || damagesAmt === ""}
+              style={({ pressed }) => [
+                styles.confirmBtn,
+                (saving || refundAmt === "" || damagesAmt === "") && { opacity: 0.5 },
+                pressed && { opacity: 0.85 },
+              ]}
             >
               {saving ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.confirmText}>Confirm & Release Vehicle</Text>}
             </Pressable>
@@ -204,6 +253,15 @@ export default function AdminBookings() {
 
 function statusLabel(s: string) {
   return s === "return_requested" ? "Return Requested" : s === "active" ? "Active" : s === "returned" ? "Returned" : s;
+}
+
+function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 4 }}>
+      <Text style={{ color: colors.onSurfaceSecondary, fontSize: type.sm, fontWeight: bold ? "700" : "500" }}>{label}</Text>
+      <Text style={{ color: bold ? colors.brandPrimary : colors.onSurface, fontSize: type.base, fontWeight: bold ? "800" : "600" }}>{value}</Text>
+    </View>
+  );
 }
 function statusColor(s: string) {
   if (s === "active") return { backgroundColor: colors.brandTertiary };
@@ -256,6 +314,9 @@ const styles = StyleSheet.create({
   label: { fontSize: type.sm, color: colors.onSurfaceSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, fontSize: type.base, color: colors.onSurface, minHeight: 48, backgroundColor: colors.surface },
   helper: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 4 },
+  errorText: { color: colors.error, fontSize: type.sm, marginTop: spacing.xs },
+  breakdownBox: { marginTop: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md },
+  divider: { height: 1, backgroundColor: colors.divider, marginVertical: spacing.xs },
   confirmBtn: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, height: 52, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
   confirmText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.lg },
   cancelBtn: { height: 44, alignItems: "center", justifyContent: "center", marginTop: spacing.xs },

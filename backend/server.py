@@ -190,6 +190,7 @@ class SettingsModel(BaseModel):
     late_fee_per_day: float = 50.0
     grace_days: int = 0
     block_after_days: int = 7  # auto-suspend vehicle after N days overdue
+    min_deposit: float = 2000.0  # recommended wallet balance even before assignment
 
 
 class SettingsUpdate(BaseModel):
@@ -198,6 +199,7 @@ class SettingsUpdate(BaseModel):
     late_fee_per_day: Optional[float] = None
     grace_days: Optional[int] = None
     block_after_days: Optional[int] = None
+    min_deposit: Optional[float] = None
 
 
 class Deposit(BaseModel):
@@ -251,7 +253,8 @@ class ReturnRequestIn(BaseModel):
 
 
 class ConfirmReturnIn(BaseModel):
-    refund_amount: float
+    refund_amount: float = 0.0
+    damages_amount: float = 0.0
     notes: Optional[str] = None
 
 
@@ -909,6 +912,17 @@ async def admin_get_settings(_: dict = Depends(admin_required)):
         "late_fee_per_day": s.get("late_fee_per_day", 50.0),
         "grace_days": s.get("grace_days", 0),
         "block_after_days": s.get("block_after_days", 7),
+        "min_deposit": s.get("min_deposit", 2000.0),
+    }
+
+
+@api_router.get("/settings/public")
+async def get_public_settings(_: dict = Depends(approved_user)):
+    s = await get_settings_doc()
+    return {
+        "min_deposit": s.get("min_deposit", 2000.0),
+        "late_fee_per_day": s.get("late_fee_per_day", 50.0),
+        "grace_days": s.get("grace_days", 0),
     }
 
 
@@ -927,6 +941,8 @@ async def admin_update_settings(body: SettingsUpdate, _: dict = Depends(admin_re
             raise HTTPException(status_code=400, detail="grace_days must be >= 0")
         if "block_after_days" in upd and upd["block_after_days"] < 0:
             raise HTTPException(status_code=400, detail="block_after_days must be >= 0")
+        if "min_deposit" in upd and upd["min_deposit"] < 0:
+            raise HTTPException(status_code=400, detail="min_deposit must be >= 0")
         await db.settings.update_one({"id": "global"}, {"$set": upd}, upsert=True)
         # Recompute fees immediately if fee/grace changed
         if "late_fee_per_day" in upd or "grace_days" in upd:
@@ -1141,13 +1157,27 @@ async def admin_user_bookings(uid: str, _: dict = Depends(admin_required)):
 
 @api_router.post("/admin/bookings/{bid}/confirm-return")
 async def admin_confirm_return(bid: str, body: ConfirmReturnIn, _: dict = Depends(admin_required)):
+    """
+    Confirm a vehicle return.
+
+    Wallet model:
+      - Customer's paid deposits act as a wallet held by the business.
+      - `damages_amount` is forfeited to the business (for damages, deductions).
+      - `refund_amount` is paid back to the customer (status=refunded).
+      - The rest stays in wallet (status=paid, vehicle_id cleared) so it can be
+        used for the next rental until the user fully exits.
+
+    Validation: refund + damages <= total paid deposits for this vehicle.
+    """
     b = await db.bookings.find_one({"id": bid}, {"_id": 0})
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found")
     if b["status"] == "returned":
         raise HTTPException(status_code=409, detail="Booking already returned")
-    if body.refund_amount < 0:
-        raise HTTPException(status_code=400, detail="refund_amount must be >= 0")
+    refund_amt = float(body.refund_amount or 0.0)
+    damages_amt = float(body.damages_amount or 0.0)
+    if refund_amt < 0 or damages_amt < 0:
+        raise HTTPException(status_code=400, detail="Amounts must be >= 0")
 
     user_id = b["user_id"]
     vehicle_id = b["vehicle_id"]
@@ -1159,10 +1189,13 @@ async def admin_confirm_return(bid: str, body: ConfirmReturnIn, _: dict = Depend
     ).sort("created_at", 1).to_list(500)
     deposit_paid = round(sum(float(d["amount"]) for d in paid_deposits), 2)
 
-    if body.refund_amount > deposit_paid + 0.001:
+    if refund_amt + damages_amt > deposit_paid + 0.001:
         raise HTTPException(
             status_code=412,
-            detail=f"Refund ₹{body.refund_amount:.0f} exceeds deposit balance ₹{deposit_paid:.0f} for this rental.",
+            detail=(
+                f"Refund ₹{refund_amt:.0f} + damages ₹{damages_amt:.0f} exceeds "
+                f"deposit balance ₹{deposit_paid:.0f} for this rental."
+            ),
         )
 
     paid_rents = await db.payments.find(
@@ -1174,63 +1207,68 @@ async def admin_confirm_return(bid: str, body: ConfirmReturnIn, _: dict = Depend
         2,
     )
 
-    # Apply refund FIFO against paid deposits; remaining gets "forfeited" (deductions)
-    remaining_refund = float(body.refund_amount)
-    deductions_remaining = round(deposit_paid - body.refund_amount, 2)
-    for d in paid_deposits:
-        if remaining_refund <= 0 and deductions_remaining <= 0:
-            break
+    async def _split_deposit(d: dict, take_amt: float, new_status: str, extra: dict):
+        """Take `take_amt` from deposit d and create a new record with new_status."""
         amt = float(d["amount"])
-        if remaining_refund >= amt - 0.001:
-            # Whole record refunded
-            await db.deposits.update_one(
-                {"id": d["id"]},
-                {"$set": {"status": "refunded", "refunded_amount": amt, "refunded_at": now_utc_iso()}},
-            )
-            remaining_refund = round(remaining_refund - amt, 2)
+        if take_amt >= amt - 0.001:
+            patch = {"status": new_status, **extra}
+            await db.deposits.update_one({"id": d["id"]}, {"$set": patch})
+            return amt
+        # Split: shrink the original (stays as is), create a new sibling for `take_amt`
+        remaining = round(amt - take_amt, 2)
+        await db.deposits.update_one({"id": d["id"]}, {"$set": {"amount": remaining}})
+        split = Deposit(
+            id=str(uuid.uuid4()), user_id=d["user_id"], vehicle_id=d.get("vehicle_id"),
+            amount=take_amt, status=new_status,
+            transaction_id=d.get("transaction_id"), paid_at=d.get("paid_at"),
+            created_at=d["created_at"],
+        ).dict()
+        split.update(extra)
+        await db.deposits.insert_one(split)
+        return take_amt
+
+    now_iso = now_utc_iso()
+    remaining_refund = refund_amt
+    remaining_damages = damages_amt
+
+    # Pass 1: apply refund FIFO
+    for d in paid_deposits:
+        if remaining_refund <= 0:
+            break
+        fresh = await db.deposits.find_one({"id": d["id"]}, {"_id": 0})
+        if not fresh or fresh.get("status") != "paid" or float(fresh["amount"]) <= 0:
             continue
-        if remaining_refund > 0:
-            # Split: refund `remaining_refund` portion; the rest stays "paid" temporarily for forfeit
-            refunded_part = remaining_refund
-            stays = round(amt - refunded_part, 2)
-            await db.deposits.update_one({"id": d["id"]}, {"$set": {"amount": stays}})
-            split = Deposit(
-                id=str(uuid.uuid4()), user_id=user_id, vehicle_id=vehicle_id,
-                amount=refunded_part, status="refunded",
-                transaction_id=d.get("transaction_id"), paid_at=d.get("paid_at"),
-                created_at=d["created_at"],
-            ).dict()
-            split["refunded_amount"] = refunded_part
-            split["refunded_at"] = now_utc_iso()
-            await db.deposits.insert_one(split)
-            remaining_refund = 0
-            amt = stays  # what's left to potentially forfeit on this record
-            if amt <= 0:
-                continue
-        # Remaining amount on this record is forfeited (admin's deductions)
-        if deductions_remaining >= amt - 0.001:
-            await db.deposits.update_one(
-                {"id": d["id"]},
-                {"$set": {
-                    "status": "forfeited",
-                    "forfeit_reason": (body.notes or "Return deductions"),
-                    "forfeit_at": now_utc_iso(),
-                }},
-            )
-            deductions_remaining = round(deductions_remaining - amt, 2)
-        elif deductions_remaining > 0:
-            # Shrink current record, create forfeit split
-            await db.deposits.update_one({"id": d["id"]}, {"$set": {"amount": round(amt - deductions_remaining, 2)}})
-            split = Deposit(
-                id=str(uuid.uuid4()), user_id=user_id, vehicle_id=vehicle_id,
-                amount=deductions_remaining, status="forfeited",
-                transaction_id=d.get("transaction_id"), paid_at=d.get("paid_at"),
-                forfeit_reason=(body.notes or "Return deductions"),
-                forfeit_at=now_utc_iso(),
-                created_at=d["created_at"],
-            )
-            await db.deposits.insert_one(split.dict())
-            deductions_remaining = 0
+        applied = await _split_deposit(
+            fresh, min(remaining_refund, float(fresh["amount"])),
+            new_status="refunded",
+            extra={"refunded_amount": min(remaining_refund, float(fresh["amount"])), "refunded_at": now_iso},
+        )
+        remaining_refund = round(remaining_refund - applied, 2)
+
+    # Pass 2: apply damages FIFO
+    reason = (body.notes or "Return deductions")
+    paid_deposits_after = await db.deposits.find(
+        {"user_id": user_id, "status": "paid", "vehicle_id": vehicle_id},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(500)
+    for d in paid_deposits_after:
+        if remaining_damages <= 0:
+            break
+        applied = await _split_deposit(
+            d, min(remaining_damages, float(d["amount"])),
+            new_status="forfeited",
+            extra={"forfeit_reason": reason, "forfeit_at": now_iso},
+        )
+        remaining_damages = round(remaining_damages - applied, 2)
+
+    # Pass 3: leftover "paid" deposits become wallet (clear vehicle_id so they
+    # are clearly free balance and not tied to the returned vehicle).
+    await db.deposits.update_many(
+        {"user_id": user_id, "status": "paid", "vehicle_id": vehicle_id},
+        {"$set": {"vehicle_id": None}},
+    )
+
+    leftover_wallet = round(deposit_paid - refund_amt - damages_amt, 2)
 
     # Release the vehicle
     await db.vehicles.update_one(
@@ -1244,33 +1282,40 @@ async def admin_confirm_return(bid: str, body: ConfirmReturnIn, _: dict = Depend
     })).deleted_count
 
     # Close the booking
-    now_iso = now_utc_iso()
     await db.bookings.update_one(
         {"id": bid},
         {"$set": {
             "status": "returned",
             "end_date": now_iso,
             "returned_at": now_iso,
-            "refund_amount": float(body.refund_amount),
+            "refund_amount": refund_amt,
+            "damages_amount": damages_amt,
+            "wallet_retained": leftover_wallet,
             "admin_notes": (body.notes or "").strip() or None,
             "total_rent_paid": total_rent_paid,
             "deposit_paid": deposit_paid,
-            "deposit_refunded": float(body.refund_amount),
+            "deposit_refunded": refund_amt,
         }},
     )
 
     # Notify customer
     veh = await db.vehicles.find_one({"id": vehicle_id}, {"_id": 0})
     veh_text = f"{veh['model']} ({veh['number_plate']})" if veh else "vehicle"
+    parts = [f"Refund ₹{refund_amt:.0f}"]
+    if damages_amt > 0:
+        parts.append(f"Damages ₹{damages_amt:.0f}")
+    if leftover_wallet > 0:
+        parts.append(f"Wallet ₹{leftover_wallet:.0f} retained")
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "user_id": user_id,
         "title": "Return Confirmed",
-        "body": f"Your return of {veh_text} is confirmed. Refund: ₹{body.refund_amount:.0f}.",
+        "body": f"Your return of {veh_text} is confirmed. " + " · ".join(parts) + ".",
         "read": False, "created_at": now_utc_iso(),
     })
 
     updated = await db.bookings.find_one({"id": bid}, {"_id": 0})
     updated["cancelled_pending_payments"] = cancelled_count
+    updated["wallet_retained"] = leftover_wallet
     return updated
 
 

@@ -92,14 +92,20 @@ export default function HistoryScreen() {
                   </Text>
                 </View>
                 <View style={styles.depositCell}>
-                  <Text style={styles.depLabel}>Deductions</Text>
-                  <Text style={[styles.depValue, item.status === "returned" && Number(item.deposit_paid || 0) - Number(item.deposit_refunded || 0) > 0 && { color: colors.error }]}>
+                  <Text style={styles.depLabel}>Damages</Text>
+                  <Text style={[styles.depValue, item.status === "returned" && Number(item.damages_amount ?? (Number(item.deposit_paid || 0) - Number(item.deposit_refunded || 0))) > 0 && { color: colors.error }]}>
                     {item.status === "returned"
-                      ? `\u20b9${Math.max(0, Number(item.deposit_paid || 0) - Number(item.deposit_refunded || 0)).toFixed(0)}`
+                      ? `₹${Number(item.damages_amount ?? Math.max(0, Number(item.deposit_paid || 0) - Number(item.deposit_refunded || 0))).toFixed(0)}`
                       : "—"}
                   </Text>
                 </View>
               </View>
+              {item.status === "returned" && Number(item.wallet_retained || 0) > 0 ? (
+                <View style={styles.walletKeptBox} testID={`wallet-kept-${item.id}`}>
+                  <Ionicons name="wallet" size={16} color={colors.brandPrimary} />
+                  <Text style={styles.walletKeptText}>₹{Number(item.wallet_retained || 0).toFixed(0)} retained in your wallet for your next rental.</Text>
+                </View>
+              ) : null}
 
               {item.customer_notes ? (
                 <View style={styles.noteBox}>
@@ -168,6 +174,8 @@ const styles = StyleSheet.create({
   depositCellMid: { flex: 1, alignItems: "center" },
   depLabel: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginBottom: 2 },
   depValue: { color: colors.onSurface, fontSize: type.base, fontWeight: "700" },
+  walletKeptBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandSecondary },
+  walletKeptText: { color: colors.onSurface, fontSize: type.sm, flex: 1, fontWeight: "600" },
   noteBox: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, gap: 4 },
   noteLabel: { fontSize: type.sm, color: colors.onSurfaceSecondary, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
   noteText: { color: colors.onSurface, fontSize: type.base, lineHeight: 20 },

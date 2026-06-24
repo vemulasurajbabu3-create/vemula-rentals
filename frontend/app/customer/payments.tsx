@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
@@ -17,21 +17,26 @@ export default function PaymentsScreen() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [deposit, setDeposit] = useState<{ balance: number; history: any[] }>({ balance: 0, history: [] });
   const [requiredDeposit, setRequiredDeposit] = useState(0);
+  const [minDeposit, setMinDeposit] = useState(2000);
   const [loading, setLoading] = useState(true);
   const [activePay, setActivePay] = useState<Payment | null>(null);
   const [activeDeposit, setActiveDeposit] = useState<any | null>(null);
   const [txn, setTxn] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [topUpOpen, setTopUpOpen] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const [p, d, v] = await Promise.all([
+      const [p, d, v, s] = await Promise.all([
         api<Payment[]>("/payments/me"),
         api<{ balance: number; history: any[] }>("/deposits/me"),
         api<any | null>("/users/me/vehicle"),
+        api<{ min_deposit: number }>("/settings/public").catch(() => ({ min_deposit: 2000 })),
       ]);
       setPayments(p); setDeposit(d);
       setRequiredDeposit(v?.security_deposit ? Number(v.security_deposit) : 0);
+      setMinDeposit(Number(s?.min_deposit ?? 2000));
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -83,10 +88,26 @@ export default function PaymentsScreen() {
     } catch {} finally { setConfirming(false); }
   };
 
+  const targetDeposit = requiredDeposit > 0 ? requiredDeposit : minDeposit;
+  const depositShortfall = Math.max(0, targetDeposit - deposit.balance);
+  const helperText = useMemo(() => {
+    if (requiredDeposit > 0) {
+      return depositShortfall > 0
+        ? `Top up ₹${depositShortfall.toFixed(0)} to fully cover the deposit for your assigned vehicle.`
+        : "Deposit fully covered. Refundable on return (after damages, if any).";
+    }
+    if (deposit.balance <= 0) {
+      return `Maintain at least ₹${minDeposit.toFixed(0)} in your wallet so the business can assign you a vehicle.`;
+    }
+    if (depositShortfall > 0) {
+      return `Add ₹${depositShortfall.toFixed(0)} to reach the recommended ₹${minDeposit.toFixed(0)} wallet balance.`;
+    }
+    return "Your wallet covers the recommended deposit. The business can assign you a vehicle anytime.";
+  }, [requiredDeposit, deposit.balance, depositShortfall, minDeposit]);
+
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
 
-  const depositShortfall = Math.max(0, requiredDeposit - deposit.balance);
-  const showDepositCard = deposit.balance > 0 || requiredDeposit > 0;
+  const presetAmounts = [500, 1000, 2000, 5000];
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]} testID="payments-screen">
@@ -107,39 +128,56 @@ export default function PaymentsScreen() {
         </View>
       )}
 
-      {showDepositCard && (
-        <View style={[styles.depositCard, shadow.card]} testID="deposit-card">
-          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" }}>
-            <Ionicons name="shield-checkmark" size={22} color={colors.onBrandPrimary} />
+      <View style={[styles.walletCard, shadow.card]} testID="deposit-card">
+        <View style={styles.walletHeaderRow}>
+          <View style={styles.walletIconWrap}>
+            <Ionicons name="wallet" size={22} color={colors.onBrandPrimary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.depositLabel}>Security Deposit</Text>
-            <Text style={styles.depositAmount}>
+            <Text style={styles.walletLabel}>Security Deposit Wallet</Text>
+            <Text style={styles.walletAmount} testID="wallet-balance">
               ₹{Number(deposit.balance).toFixed(0)}
-              {requiredDeposit > 0 && (
-                <Text style={styles.depositMuted}>{`  / ₹${requiredDeposit.toFixed(0)}`}</Text>
-              )}
+              <Text style={styles.walletMuted}>{`  / ₹${targetDeposit.toFixed(0)} ${requiredDeposit > 0 ? "required" : "recommended"}`}</Text>
             </Text>
-            <Text style={styles.depositSub} testID="deposit-sub">
-              {depositShortfall > 0
-                ? `Pay ₹${depositShortfall.toFixed(0)} to complete your deposit.`
-                : requiredDeposit > 0
-                ? "Deposit fully paid. Refundable on return."
-                : "Refundable on return."}
-            </Text>
-            {depositShortfall > 0 && (
-              <Pressable
-                testID="pay-deposit-button"
-                onPress={() => startDeposit(depositShortfall)}
-                style={({ pressed }) => [styles.depositCta, { marginTop: spacing.sm }, pressed && { opacity: 0.85 }]}
-              >
-                <Ionicons name="flash" size={14} color={colors.onBrandPrimary} />
-                <Text style={styles.depositCtaText}>Pay Deposit</Text>
-              </Pressable>
-            )}
           </View>
+          {depositShortfall > 0 ? (
+            <View style={[styles.statusChip, { backgroundColor: colors.warning + "22" }]}>
+              <Text style={[styles.statusChipText, { color: colors.warning }]}>Top up</Text>
+            </View>
+          ) : (
+            <View style={[styles.statusChip, { backgroundColor: colors.brandSecondary }]}>
+              <Text style={[styles.statusChipText, { color: colors.onBrandSecondary }]}>Funded</Text>
+            </View>
+          )}
         </View>
-      )}
+
+        <View style={styles.walletProgressTrack}>
+          <View style={[styles.walletProgressFill, { width: `${Math.min(100, (deposit.balance / Math.max(1, targetDeposit)) * 100).toFixed(0)}%` }]} />
+        </View>
+
+        <Text style={styles.walletHelper} testID="deposit-sub">{helperText}</Text>
+
+        <View style={styles.walletButtonRow}>
+          {depositShortfall > 0 && (
+            <Pressable
+              testID="pay-deposit-button"
+              onPress={() => startDeposit(depositShortfall)}
+              style={({ pressed }) => [styles.depositCta, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="flash" size={14} color={colors.onBrandPrimary} />
+              <Text style={styles.depositCtaText}>{`Pay ₹${depositShortfall.toFixed(0)}`}</Text>
+            </Pressable>
+          )}
+          <Pressable
+            testID="top-up-button"
+            onPress={() => { setTopUpAmount(""); setTopUpOpen(true); }}
+            style={({ pressed }) => [styles.topUpCta, pressed && { opacity: 0.85 }]}
+          >
+            <Ionicons name="add-circle" size={14} color={colors.brandPrimary} />
+            <Text style={styles.topUpCtaText}>Top Up Wallet</Text>
+          </Pressable>
+        </View>
+      </View>
 
       <FlatList
         data={payments}
@@ -180,6 +218,54 @@ export default function PaymentsScreen() {
           );
         }}
       />
+
+      <Modal visible={topUpOpen} transparent animationType="slide" onRequestClose={() => setTopUpOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
+          <View style={styles.sheet} testID="top-up-sheet">
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Top Up Wallet</Text>
+            <Text style={styles.sheetBody}>Add any amount to your security deposit wallet. The business holds this balance until you return the vehicle.</Text>
+            <Text style={styles.label}>Amount (₹)</Text>
+            <TextInput
+              testID="top-up-input"
+              value={topUpAmount}
+              onChangeText={(t) => setTopUpAmount(t.replace(/[^0-9]/g, ""))}
+              placeholder="e.g. 1000"
+              placeholderTextColor={colors.onSurfaceSecondary}
+              style={styles.txInput}
+              keyboardType="numeric"
+            />
+            <View style={styles.presetRow}>
+              {presetAmounts.map((amt) => (
+                <Pressable
+                  key={amt}
+                  testID={`preset-${amt}`}
+                  onPress={() => setTopUpAmount(String(amt))}
+                  style={({ pressed }) => [styles.presetChip, pressed && { opacity: 0.85 }, topUpAmount === String(amt) && styles.presetChipActive]}
+                >
+                  <Text style={[styles.presetText, topUpAmount === String(amt) && styles.presetTextActive]}>{`₹${amt}`}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable
+              testID="confirm-top-up-button"
+              onPress={() => {
+                const n = Number(topUpAmount);
+                if (!Number.isFinite(n) || n <= 0) return;
+                setTopUpOpen(false);
+                startDeposit(n);
+              }}
+              disabled={!Number(topUpAmount) || Number(topUpAmount) <= 0}
+              style={({ pressed }) => [styles.confirmCta, (!Number(topUpAmount) || Number(topUpAmount) <= 0) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
+            >
+              <Text style={styles.confirmText}>Continue to UPI</Text>
+            </Pressable>
+            <Pressable onPress={() => setTopUpOpen(false)} style={styles.cancelBtn}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal visible={!!activePay} transparent animationType="slide" onRequestClose={() => setActivePay(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
@@ -283,4 +369,21 @@ const styles = StyleSheet.create({
   depositSub: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 4, lineHeight: 18 },
   depositCta: { flexDirection: "row", gap: 6, alignItems: "center", backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, alignSelf: "flex-start" },
   depositCtaText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.sm },
+  walletCard: { marginHorizontal: spacing.lg, marginBottom: spacing.md, padding: spacing.lg, backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.divider, gap: spacing.sm },
+  walletHeaderRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  walletIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  walletLabel: { color: colors.brandPrimary, fontSize: type.sm, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
+  walletAmount: { color: colors.onSurface, fontSize: 24, fontWeight: "800", marginTop: 4 },
+  walletMuted: { fontSize: type.sm, color: colors.onSurfaceSecondary, fontWeight: "500" },
+  walletProgressTrack: { marginTop: spacing.sm, height: 6, borderRadius: 3, backgroundColor: colors.surfaceSecondary, overflow: "hidden" },
+  walletProgressFill: { height: 6, backgroundColor: colors.brandPrimary },
+  walletHelper: { color: colors.onSurfaceSecondary, fontSize: type.sm, lineHeight: 18, marginTop: 4 },
+  walletButtonRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm },
+  topUpCta: { flexDirection: "row", gap: 6, alignItems: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  topUpCtaText: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.sm },
+  presetRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm },
+  presetChip: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
+  presetChipActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  presetText: { color: colors.onSurface, fontWeight: "700", fontSize: type.sm },
+  presetTextActive: { color: colors.brandPrimary },
 });
