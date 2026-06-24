@@ -395,10 +395,10 @@ async def list_vehicles(_: dict = Depends(admin_required)):
 @api_router.post("/vehicles", response_model=Vehicle)
 async def create_vehicle(body: VehicleCreate, _: dict = Depends(admin_required)):
     v = Vehicle(
-        id=str(uuid.uuid4()), vehicle_type=body.vehicle_type, model=body.model,
-        number_plate=body.number_plate, weekly_rent=body.weekly_rent,
-        status="available", instructions=body.instructions, image_url=body.image_url,
+        id=str(uuid.uuid4()),
+        status="available",
         created_at=now_utc_iso(),
+        **body.dict(),
     )
     await db.vehicles.insert_one(v.dict())
     return v

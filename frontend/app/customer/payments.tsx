@@ -107,6 +107,40 @@ export default function PaymentsScreen() {
         </View>
       )}
 
+      {showDepositCard && (
+        <View style={[styles.depositCard, shadow.card]} testID="deposit-card">
+          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="shield-checkmark" size={22} color={colors.onBrandPrimary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.depositLabel}>Security Deposit</Text>
+            <Text style={styles.depositAmount}>
+              ₹{Number(deposit.balance).toFixed(0)}
+              {requiredDeposit > 0 && (
+                <Text style={styles.depositMuted}>{`  / ₹${requiredDeposit.toFixed(0)}`}</Text>
+              )}
+            </Text>
+            <Text style={styles.depositSub} testID="deposit-sub">
+              {depositShortfall > 0
+                ? `Pay ₹${depositShortfall.toFixed(0)} to complete your deposit.`
+                : requiredDeposit > 0
+                ? "Deposit fully paid. Refundable on return."
+                : "Refundable on return."}
+            </Text>
+            {depositShortfall > 0 && (
+              <Pressable
+                testID="pay-deposit-button"
+                onPress={() => startDeposit(depositShortfall)}
+                style={({ pressed }) => [styles.depositCta, { marginTop: spacing.sm }, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons name="flash" size={14} color={colors.onBrandPrimary} />
+                <Text style={styles.depositCtaText}>Pay Deposit</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
+
       <FlatList
         data={payments}
         keyExtractor={(item) => item.id}

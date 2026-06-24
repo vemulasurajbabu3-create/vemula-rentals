@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 3 re-test after fixes. Both critical iteration_2 bugs are RESOLVED. Backend pytest /app/backend/tests/test_deposits_and_vehicles.py is 5/5 PASS: POST /api/vehicles now persists security_deposit=2500 and walk_around_video; subsequent GET echoes back the same values; deposit GET/POST/mark-paid still pass; assign-after-deposit gate succeeds. Frontend deposit card now renders correctly on /customer/payments: card visible (testID=deposit-card), Pay Deposit button visible when shortfall (testID=pay-deposit-button), tapping it opens the modal (testID=deposit-txn-input + confirm-deposit-button), submitting transaction id TEST123 updates the card to the fully paid state (no Pay Deposit button, sub-text 'Deposit fully paid. Refundable on return.'), and backend deposit balance reflects 2500. Sanity checks still pass: admin Add Vehicle modal shows field-deposit + Walk-around Video Camera/Gallery buttons; customer home location-banner is rendered (web preview).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Customer Payments modal (Confirm Deposit Payment sheet)",
+        "issues": [
+          "Confirm Deposit modal's 'Credit Deposit' button can sit just below the visible viewport area on the 375x667 mobile preview, requiring a scroll/scroll-into-view to click. Real users will likely scroll the sheet, but on small screens the CTA could be hidden behind the keyboard. Consider tightening modal padding or making the sheet scrollable so the primary CTA is always visible above the fold."
+        ]
+      }
+    ],
+    "react_native_issues": [
+      {
+        "component": "react-native-web warnings",
+        "issue": "Multiple console warnings on every screen: 'props.pointerEvents is deprecated. Use style.pointerEvents' and '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Sources are third-party components (likely react-native-safe-area-context / Ionicons). Reference: customer/payments.tsx and others (warnings logged when these screens mount)."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deposits_and_vehicles.py",
+    "/app/test_reports/pytest/deposits_results.xml",
+    "/app/test_reports/screens/10_deposit_card_shortfall.png",
+    "/app/test_reports/screens/11_deposit_card_paid.png",
+    "/app/test_reports/screens/12_admin_vehicle_modal.png"
+  ],
+  "action_items": [
+    "[OPTIONAL minor] On the 'Confirm Deposit Payment' bottom sheet (customer/payments.tsx ~line 214-243), ensure the 'Credit Deposit' Pressable is reachable without scrolling on 375x667 viewports (reduce vertical padding or wrap sheet in ScrollView).",
+    "[OPTIONAL nice-to-have] Show security_deposit value in admin/vehicles list rows so admins can visually confirm persistence at a glance.",
+    "[INFO] react-native-web deprecation warnings (pointerEvents/shadow*) — non-blocking, track for next RN/Expo upgrade."
+  ],
+  "critical_code_review_comments": [
+    "server.py:create_vehicle now uses **body.dict() — clean fix; new VehicleCreate fields will auto-propagate going forward.",
+    "customer/payments.tsx: deposit card JSX wired correctly; showDepositCard / depositShortfall / startDeposit are now all consumed."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (5/5 pytest)",
+    "frontend": "100% (deposit-card visible + pay flow end-to-end works; admin & customer-home sanity pass)"
+  },
+  "seed_data_creation": "Created two TEST customers (random 8888x phones) with approved status + one TEST vehicle each (TEST UI Bike / TEST Bike) assigned with security_deposit=2500. One customer paid the ₹2500 deposit via UI (transaction_id=TEST123). All data is TEST-prefixed; safe to leave or delete.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Both critical iteration_2 bugs are confirmed fixed and stable. If more changes land on customer/payments.tsx or server.py create_vehicle, re-run pytest test_deposits_and_vehicles.py (must hit 5/5) and the UI script under iteration_3 (deposit-card shortfall → Pay Deposit → modal → TEST123 → fully paid).",
+  "rca_of_issue": "n/a — both previously reported bugs are resolved and verified end-to-end (backend pytest + Playwright UI on 375x667)."
+}

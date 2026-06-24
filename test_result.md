@@ -126,18 +126,21 @@ backend:
 
   - task: "Vehicle creation supports security_deposit and walk_around_video"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/server.py"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
           comment: "POST/PATCH admin vehicle endpoints should accept security_deposit (number) and walk_around_video (string/base64 or url)."
         - working: false
           agent: "testing"
-          comment: "FAIL — server.py:create_vehicle (lines 395-404) builds Vehicle(...) WITHOUT forwarding body.security_deposit or body.walk_around_video. Repro: POST /api/vehicles {security_deposit:2500, walk_around_video:'data:video/mp4;base64,AAAA'} → 200 OK with security_deposit=2000.0 (default) and walk_around_video=null. Tests: TestVehicleCreate.test_create_vehicle_with_deposit_and_video and TestAssignmentDepositGate.test_assign_after_deposit_succeeds. PUT /vehicles/{vid} (update) DOES correctly forward both fields, so edit works — only create is broken. Fix: replace explicit kwargs with `v = Vehicle(id=str(uuid.uuid4()), status='available', created_at=now_utc_iso(), **body.dict())`."
+          comment: "FAIL — server.py:create_vehicle (lines 395-404) builds Vehicle(...) WITHOUT forwarding body.security_deposit or body.walk_around_video. Fix: `v = Vehicle(id=str(uuid.uuid4()), status='available', created_at=now_utc_iso(), **body.dict())`."
+        - working: true
+          agent: "testing"
+          comment: "PASS (iteration_3) — server.py:create_vehicle now uses **body.dict(). pytest test_create_vehicle_with_deposit_and_video PASSES: POST /api/vehicles {security_deposit:2500, walk_around_video:'data:video/mp4;base64,AAAA'} → 200 with security_deposit=2500.0 and walk_around_video echoed. Subsequent GET /api/vehicles list confirms persistence. TestAssignmentDepositGate.test_assign_after_deposit_succeeds also PASSES. Full pytest suite 5/5."
 
 frontend:
   - task: "Customer Home: Share live location with emergency contact button"
@@ -171,19 +174,22 @@ frontend:
           comment: "PASS (UI) — Add Vehicle modal contains testID=field-deposit (default 2000) and Walk-around Video section with testID=vehicle-video-camera (Record) + testID=vehicle-video-gallery (From Gallery). Save returns 200 OK and the vehicle appears in the list. NOTE: even though UI submits security_deposit=2500, the backend silently drops it (see backend task above). UI itself is correct."
 
   - task: "Customer Payments: Deposit card visible before vehicle assignment"
-    implemented: false
-    working: false
+    implemented: true
+    working: true
     file: "/app/frontend/app/customer/payments.tsx"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
           comment: "Deposit card shows when deposit.balance>0 OR requiredDeposit>0 (even if no vehicle assigned)."
         - working: false
           agent: "testing"
-          comment: "FAIL — Deposit card UI is completely missing from the render tree. customer/payments.tsx defines `showDepositCard`, `depositShortfall`, `startDeposit` and `styles.depositCard*` (lines 64-89, 245-251) but NO JSX block references `showDepositCard` or `styles.depositCard`. Verified live: customer with security_deposit=2000 vehicle assigned + ₹2000 already paid still sees only weekly rent ₹700 on the Payments tab; there is no deposit card, no `Pay Deposit` CTA, no testID `deposit-card`. The activeDeposit modal with testID=deposit-txn-input/confirm-deposit-button already exists (lines 180-209) — only the entry-point card needs to be added between line 108 (pendingBanner end) and line 110 (FlatList start)."
+          comment: "FAIL — Deposit card UI is completely missing from the render tree. customer/payments.tsx defines `showDepositCard`, `depositShortfall`, `startDeposit` and `styles.depositCard*` but NO JSX block references them. The activeDeposit modal with testID=deposit-txn-input/confirm-deposit-button already exists — only the entry-point card needs to be added."
+        - working: true
+          agent: "testing"
+          comment: "PASS (iteration_3) — customer/payments.tsx lines 110-142 now render the deposit card. Verified live on 375x667: approved customer with assigned vehicle security_deposit=2500, balance=0 → testID=deposit-card visible, sub-text 'Pay ₹2500 to complete your deposit.', testID=pay-deposit-button visible. Tap → modal opens (deposit-txn-input + confirm-deposit-button), submit 'TEST123' → card flips to fully-paid state ('Deposit fully paid. Refundable on return.'), Pay Deposit button disappears, backend GET /api/deposits/me balance updates to 2500. Screenshots: /app/test_reports/screens/10_deposit_card_shortfall.png and 11_deposit_card_paid.png. Minor UX: in the confirm modal the 'Credit Deposit' button can sit just below the visible viewport on tiny screens and needs scroll — non-blocking."
 
 metadata:
   created_by: "main_agent"
@@ -218,3 +224,13 @@ agent_communication:
         2) FRONTEND (customer/payments.tsx): the deposit card JSX is missing entirely. `showDepositCard`, `depositShortfall`, `startDeposit`, and styles.depositCard* are defined but no <View> renders them. Customer cannot pay a security deposit from the Payments tab.
         Passing: GET/POST /api/deposits flows (3/3 pytest), Customer Home location-banner, Admin Vehicle modal field-deposit + Walk-around Video Record/Gallery buttons.
         Full report → /app/test_reports/iteration_2.json. Pytest results → /app/test_reports/pytest/deposits_results.xml. Screenshots in /app/test_reports/screens/. Please fix both bugs and request re-test.
+    - agent: "testing"
+      message: |
+        Iteration 3 RE-TEST — BOTH FIXES VERIFIED, ALL GREEN.
+        Backend: pytest /app/backend/tests/test_deposits_and_vehicles.py = 5/5 PASS. POST /api/vehicles now persists security_deposit=2500 + walk_around_video; GET echoes back; assign-after-deposit gate passes.
+        Frontend (Playwright on 375x667 web preview):
+          - Deposit shortfall flow: registered fresh approved customer → admin created vehicle, assigned it, bumped security_deposit to 2500 → /customer/payments shows testID=deposit-card with sub 'Pay ₹2500 to complete your deposit.' and testID=pay-deposit-button.
+          - Tap → modal (testID=deposit-txn-input + confirm-deposit-button) → submit 'TEST123' → card flips to fully-paid state, Pay Deposit button removed, /api/deposits/me balance=2500.
+          - Sanity: admin Add Vehicle modal has testID=field-deposit + vehicle-video-camera + vehicle-video-gallery; customer home renders location-banner.
+        Screenshots: /app/test_reports/screens/10_deposit_card_shortfall.png, 11_deposit_card_paid.png, 12_admin_vehicle_modal.png.
+        Report: /app/test_reports/iteration_3.json. Only optional nice-to-have: 'Credit Deposit' CTA in confirm sheet sits just below fold on 667px height — non-blocking.
