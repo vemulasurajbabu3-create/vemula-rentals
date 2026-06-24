@@ -163,6 +163,15 @@ function EditPaymentSheet({ payment, onClose, onSaved }: { payment: any | null; 
     try { await api(`/admin/payments/${payment.id}`, { method: "DELETE" }); onSaved(); } catch {}
   };
 
+  const markCash = async () => {
+    if (!payment) return;
+    setSaving(true);
+    try {
+      await api(`/admin/payments/${payment.id}/mark-paid-cash`, { method: "POST", body: {} });
+      onSaved();
+    } catch (e: any) { alert(e?.message || "Could not mark cash payment"); } finally { setSaving(false); }
+  };
+
   return (
     <Modal visible={!!payment} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
@@ -189,6 +198,12 @@ function EditPaymentSheet({ payment, onClose, onSaved }: { payment: any | null; 
             <Pressable testID="save-payment" onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.85 }, saving && { opacity: 0.5 }]}>
               {saving ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.saveText}>Save Changes</Text>}
             </Pressable>
+            {payment?.status === "pending" ? (
+              <Pressable testID="mark-cash-paid-button" onPress={markCash} disabled={saving} style={({ pressed }) => [styles.cashBtn, pressed && { opacity: 0.85 }, saving && { opacity: 0.5 }]}>
+                <Ionicons name="cash" size={18} color={colors.onBrandPrimary} />
+                <Text style={styles.saveText}>Mark Paid (Cash)</Text>
+              </Pressable>
+            ) : null}
             <Pressable testID="delete-payment" onPress={remove} style={styles.deleteBtn}>
               <Text style={styles.deleteText}>Delete Payment</Text>
             </Pressable>
@@ -239,6 +254,7 @@ const styles = StyleSheet.create({
   statusBtnText: { color: colors.onSurface, fontWeight: "700", textTransform: "capitalize" },
   statusBtnTextActive: { color: colors.onBrandPrimary },
   saveBtn: { marginTop: spacing.xl, backgroundColor: colors.brandPrimary, height: 52, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+  cashBtn: { marginTop: spacing.sm, flexDirection: "row", gap: 8, backgroundColor: "#2a7e3c", height: 50, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
   saveText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.lg },
   deleteBtn: { marginTop: spacing.sm, paddingVertical: spacing.md, alignItems: "center", borderRadius: radius.md, borderWidth: 1, borderColor: colors.error },
   deleteText: { color: colors.error, fontWeight: "700" },

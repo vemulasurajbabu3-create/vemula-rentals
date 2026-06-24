@@ -8,8 +8,8 @@ import * as Haptics from "expo-haptics";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
-const MERCHANT_VPA = "vemularentals@upi";
-const MERCHANT_NAME = "Vemula Rentals";
+const MERCHANT_VPA_DEFAULT = "vemula.balajee@ybl";
+const MERCHANT_NAME_DEFAULT = "Vemula Rentals";
 
 type Payment = any;
 
@@ -18,6 +18,8 @@ export default function PaymentsScreen() {
   const [deposit, setDeposit] = useState<{ balance: number; history: any[] }>({ balance: 0, history: [] });
   const [requiredDeposit, setRequiredDeposit] = useState(0);
   const [minDeposit, setMinDeposit] = useState(2000);
+  const [merchantUpi, setMerchantUpi] = useState(MERCHANT_VPA_DEFAULT);
+  const [merchantName, setMerchantName] = useState(MERCHANT_NAME_DEFAULT);
   const [loading, setLoading] = useState(true);
   const [activePay, setActivePay] = useState<Payment | null>(null);
   const [activeDeposit, setActiveDeposit] = useState<any | null>(null);
@@ -32,11 +34,13 @@ export default function PaymentsScreen() {
         api<Payment[]>("/payments/me"),
         api<{ balance: number; history: any[] }>("/deposits/me"),
         api<any | null>("/users/me/vehicle"),
-        api<{ min_deposit: number }>("/settings/public").catch(() => ({ min_deposit: 2000 })),
+        api<{ min_deposit: number; merchant_upi?: string; merchant_name?: string }>("/settings/public").catch(() => ({ min_deposit: 2000 } as any)),
       ]);
       setPayments(p); setDeposit(d);
       setRequiredDeposit(v?.security_deposit ? Number(v.security_deposit) : 0);
       setMinDeposit(Number(s?.min_deposit ?? 2000));
+      if (s?.merchant_upi) setMerchantUpi(s.merchant_upi);
+      if (s?.merchant_name) setMerchantName(s.merchant_name);
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -48,7 +52,7 @@ export default function PaymentsScreen() {
   const openUpi = async (p: Payment) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     const total = Number(p.amount) + Number(p.late_fee || 0);
-    const url = `upi://pay?pa=${encodeURIComponent(MERCHANT_VPA)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${total}&tn=${encodeURIComponent("Weekly Rent " + p.id.slice(0, 6))}&cu=INR`;
+    const url = `upi://pay?pa=${encodeURIComponent(merchantUpi)}&pn=${encodeURIComponent(merchantName)}&am=${total}&tn=${encodeURIComponent("Weekly Rent " + p.id.slice(0, 6))}&cu=INR`;
     setActivePay(p); setTxn("");
     if (Platform.OS !== "web") {
       try { const ok = await Linking.canOpenURL(url); if (ok) await Linking.openURL(url); } catch {}
@@ -70,7 +74,7 @@ export default function PaymentsScreen() {
     if (amount <= 0) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     const d = await api<any>("/deposits", { method: "POST", body: { amount } });
-    const url = `upi://pay?pa=${encodeURIComponent(MERCHANT_VPA)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${amount}&tn=${encodeURIComponent("Security Deposit " + d.id.slice(0, 6))}&cu=INR`;
+    const url = `upi://pay?pa=${encodeURIComponent(merchantUpi)}&pn=${encodeURIComponent(merchantName)}&am=${amount}&tn=${encodeURIComponent("Security Deposit " + d.id.slice(0, 6))}&cu=INR`;
     setActiveDeposit(d); setTxn("");
     if (Platform.OS !== "web") {
       try { const ok = await Linking.canOpenURL(url); if (ok) await Linking.openURL(url); } catch {}

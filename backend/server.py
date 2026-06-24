@@ -132,11 +132,17 @@ class Payment(BaseModel):
     status: str  # pending | paid | failed
     transaction_id: Optional[str] = None
     paid_at: Optional[str] = None
+    payment_method: Optional[str] = None  # upi | cash | other
     created_at: str
 
 
 class PaymentMarkPaid(BaseModel):
     transaction_id: str
+    payment_method: Optional[str] = "upi"
+
+
+class AdminMarkCashIn(BaseModel):
+    note: Optional[str] = None
 
 
 class PaymentAdminUpdate(BaseModel):
@@ -191,6 +197,12 @@ class SettingsModel(BaseModel):
     grace_days: int = 0
     block_after_days: int = 7  # auto-suspend vehicle after N days overdue
     min_deposit: float = 2000.0  # recommended wallet balance even before assignment
+    merchant_upi: str = "vemula.balajee@ybl"
+    merchant_name: str = "Vemula Rentals"
+    business_phone: str = "+919160442323"
+    pickup_address: str = "Vemula Rentals Pickup Point"
+    pickup_lat: float = 17.527688
+    pickup_lng: float = 78.394619
 
 
 class SettingsUpdate(BaseModel):
@@ -200,6 +212,12 @@ class SettingsUpdate(BaseModel):
     grace_days: Optional[int] = None
     block_after_days: Optional[int] = None
     min_deposit: Optional[float] = None
+    merchant_upi: Optional[str] = None
+    merchant_name: Optional[str] = None
+    business_phone: Optional[str] = None
+    pickup_address: Optional[str] = None
+    pickup_lat: Optional[float] = None
+    pickup_lng: Optional[float] = None
 
 
 class Deposit(BaseModel):
@@ -517,7 +535,14 @@ async def assign_vehicle(body: AssignIn, _: dict = Depends(admin_required)):
     )
     existing = await db.payments.find_one({"user_id": body.user_id, "status": "pending"}, {"_id": 0})
     if not existing:
-        due = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        # Anchor due date to vehicle assignment date + 7 days (per-user weekly cadence)
+        try:
+            start_dt = datetime.fromisoformat(start)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            start_dt = datetime.now(timezone.utc)
+        due = (start_dt + timedelta(days=7)).isoformat()
         await db.payments.insert_one({
             "id": str(uuid.uuid4()), "user_id": body.user_id, "vehicle_id": body.vehicle_id,
             "amount": veh["weekly_rent"], "late_fee": 0.0, "due_date": due, "status": "pending",
@@ -553,7 +578,12 @@ async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depend
     paid_total = float(p["amount"]) + float(p.get("late_fee", 0.0))
     await db.payments.update_one(
         {"id": pid},
-        {"$set": {"status": "paid", "transaction_id": body.transaction_id, "paid_at": now_utc_iso()}},
+        {"$set": {
+            "status": "paid",
+            "transaction_id": body.transaction_id,
+            "paid_at": now_utc_iso(),
+            "payment_method": (body.payment_method or "upi"),
+        }},
     )
     # Create next pending payment
     veh = await db.vehicles.find_one({"assigned_to": user["id"]}, {"_id": 0})
@@ -638,6 +668,67 @@ async def admin_edit_payment(pid: str, body: PaymentAdminUpdate, _: dict = Depen
 async def admin_delete_payment(pid: str, _: dict = Depends(admin_required)):
     await db.payments.delete_one({"id": pid})
     return {"ok": True}
+
+
+@api_router.post("/admin/payments/{pid}/mark-paid-cash", response_model=Payment)
+async def admin_mark_cash_paid(pid: str, body: AdminMarkCashIn, admin: dict = Depends(admin_required)):
+    """Admin marks a pending payment as paid in cash (records who took it & when).
+
+    Also creates the NEXT pending payment anchored to this payment's due_date + 7 days,
+    keeping the per-user weekly cadence aligned with their vehicle assignment day/time.
+    """
+    await _compute_late_fees_once()
+    p = await db.payments.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if p["status"] == "paid":
+        return Payment(**p)
+    now_iso = now_utc_iso()
+    txn = f"CASH-{int(datetime.now(timezone.utc).timestamp())}"
+    await db.payments.update_one(
+        {"id": pid},
+        {"$set": {
+            "status": "paid",
+            "payment_method": "cash",
+            "transaction_id": txn,
+            "paid_at": now_iso,
+            "cash_received_by": admin.get("id"),
+            "cash_note": (body.note or "").strip() or None,
+        }},
+    )
+    # Create next pending payment anchored to previous due_date + 7 days
+    veh = await db.vehicles.find_one({"id": p.get("vehicle_id")}, {"_id": 0})
+    if veh and veh.get("assigned_to") == p["user_id"]:
+        try:
+            prev_due_dt = datetime.fromisoformat(p["due_date"])
+            if prev_due_dt.tzinfo is None:
+                prev_due_dt = prev_due_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            prev_due_dt = datetime.now(timezone.utc)
+        # Don't duplicate if a later pending already exists
+        existing_later = await db.payments.find_one(
+            {"user_id": p["user_id"], "vehicle_id": veh["id"], "status": "pending"},
+            {"_id": 0},
+        )
+        if not existing_later:
+            await db.payments.insert_one({
+                "id": str(uuid.uuid4()), "user_id": p["user_id"], "vehicle_id": veh["id"],
+                "amount": veh["weekly_rent"], "late_fee": 0.0,
+                "due_date": (prev_due_dt + timedelta(days=7)).isoformat(),
+                "status": "pending", "transaction_id": None, "paid_at": None,
+                "created_at": now_iso,
+            })
+        # Unblock the vehicle if it was suspended
+        if veh.get("status") == "blocked":
+            await db.vehicles.update_one({"id": veh["id"]}, {"$set": {"status": "rented"}})
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "user_id": p["user_id"],
+        "title": "Payment Received (Cash)",
+        "body": f"Weekly rent of ₹{(p['amount'] + p.get('late_fee', 0)):.0f} confirmed in cash. Thank you!",
+        "read": False, "created_at": now_iso,
+    })
+    updated = await db.payments.find_one({"id": pid}, {"_id": 0})
+    return Payment(**updated)
 
 
 # -------------------- DOCUMENT ROUTES --------------------
@@ -913,6 +1004,12 @@ async def admin_get_settings(_: dict = Depends(admin_required)):
         "grace_days": s.get("grace_days", 0),
         "block_after_days": s.get("block_after_days", 7),
         "min_deposit": s.get("min_deposit", 2000.0),
+        "merchant_upi": s.get("merchant_upi", "vemula.balajee@ybl"),
+        "merchant_name": s.get("merchant_name", "Vemula Rentals"),
+        "business_phone": s.get("business_phone", "+919160442323"),
+        "pickup_address": s.get("pickup_address", "Vemula Rentals Pickup Point"),
+        "pickup_lat": s.get("pickup_lat", 17.527688),
+        "pickup_lng": s.get("pickup_lng", 78.394619),
     }
 
 
@@ -923,6 +1020,12 @@ async def get_public_settings(_: dict = Depends(approved_user)):
         "min_deposit": s.get("min_deposit", 2000.0),
         "late_fee_per_day": s.get("late_fee_per_day", 50.0),
         "grace_days": s.get("grace_days", 0),
+        "merchant_upi": s.get("merchant_upi", "vemula.balajee@ybl"),
+        "merchant_name": s.get("merchant_name", "Vemula Rentals"),
+        "business_phone": s.get("business_phone", "+919160442323"),
+        "pickup_address": s.get("pickup_address", "Vemula Rentals Pickup Point"),
+        "pickup_lat": s.get("pickup_lat", 17.527688),
+        "pickup_lng": s.get("pickup_lng", 78.394619),
     }
 
 
@@ -943,6 +1046,24 @@ async def admin_update_settings(body: SettingsUpdate, _: dict = Depends(admin_re
             raise HTTPException(status_code=400, detail="block_after_days must be >= 0")
         if "min_deposit" in upd and upd["min_deposit"] < 0:
             raise HTTPException(status_code=400, detail="min_deposit must be >= 0")
+        if "merchant_upi" in upd:
+            v = (upd["merchant_upi"] or "").strip()
+            if not v or "@" not in v:
+                raise HTTPException(status_code=400, detail="merchant_upi must look like name@bank")
+            upd["merchant_upi"] = v
+        if "merchant_name" in upd:
+            v = (upd["merchant_name"] or "").strip()
+            if not v:
+                raise HTTPException(status_code=400, detail="merchant_name cannot be empty")
+            upd["merchant_name"] = v
+        if "business_phone" in upd:
+            upd["business_phone"] = (upd["business_phone"] or "").strip()
+        if "pickup_address" in upd:
+            upd["pickup_address"] = (upd["pickup_address"] or "").strip()
+        if "pickup_lat" in upd and not -90 <= upd["pickup_lat"] <= 90:
+            raise HTTPException(status_code=400, detail="pickup_lat must be between -90 and 90")
+        if "pickup_lng" in upd and not -180 <= upd["pickup_lng"] <= 180:
+            raise HTTPException(status_code=400, detail="pickup_lng must be between -180 and 180")
         await db.settings.update_one({"id": "global"}, {"$set": upd}, upsert=True)
         # Recompute fees immediately if fee/grace changed
         if "late_fee_per_day" in upd or "grace_days" in upd:

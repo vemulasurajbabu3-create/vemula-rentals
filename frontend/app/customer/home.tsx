@@ -8,6 +8,7 @@ import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 import { getStatus, requestPermissions, sendCurrentLocation, startBackgroundTracking, stopBackgroundTracking, isBackgroundRunning } from "@/src/services/location";
 import * as Location from "expo-location";
+import PickupAddressCard from "@/src/components/PickupAddressCard";
 
 type Vehicle = any;
 type Payment = any;
@@ -178,6 +179,9 @@ export default function Home() {
             <Text style={styles.shareLocText}>Share my live location with my emergency contact</Text>
           </Pressable>
         )}
+
+        {/* Pickup & drop-off address */}
+        <PickupAddressCard />
 
         {/* Payment Card */}
         <View style={[styles.paymentCard, shadow.card]} testID="payment-status-card">

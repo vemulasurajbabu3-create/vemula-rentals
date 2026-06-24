@@ -8,7 +8,19 @@ import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-type S = { reminder_weekday: number; reminder_hour_ist: number; late_fee_per_day: number; grace_days: number };
+type S = {
+  reminder_weekday: number;
+  reminder_hour_ist: number;
+  late_fee_per_day: number;
+  grace_days: number;
+  min_deposit?: number;
+  merchant_upi?: string;
+  merchant_name?: string;
+  business_phone?: string;
+  pickup_address?: string;
+  pickup_lat?: number;
+  pickup_lng?: number;
+};
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -93,6 +105,89 @@ export default function AdminSettings() {
             placeholderTextColor={colors.onSurfaceSecondary}
           />
           <Text style={styles.hint}>If a customer is late by more than {s.grace_days} day(s), ₹{s.late_fee_per_day} per extra day is auto-added to their pending payment.</Text>
+        </View>
+
+        {/* UPI & Cash payouts */}
+        <Text style={styles.section}>Payouts</Text>
+        <View style={[styles.card, shadow.card]}>
+          <Text style={styles.label}>Merchant UPI ID (where customer money lands)</Text>
+          <TextInput
+            testID="merchant-upi-input"
+            value={s.merchant_upi || ""}
+            onChangeText={(t) => update({ merchant_upi: t })}
+            placeholder="e.g. vemula.balajee@ybl"
+            placeholderTextColor={colors.onSurfaceSecondary}
+            style={styles.input}
+            autoCapitalize="none"
+          />
+          <Text style={styles.label}>Business name shown on UPI</Text>
+          <TextInput
+            testID="merchant-name-input"
+            value={s.merchant_name || ""}
+            onChangeText={(t) => update({ merchant_name: t })}
+            placeholder="e.g. Vemula Rentals"
+            placeholderTextColor={colors.onSurfaceSecondary}
+            style={styles.input}
+          />
+          <Text style={styles.label}>Business contact phone</Text>
+          <TextInput
+            testID="business-phone-input"
+            value={s.business_phone || ""}
+            onChangeText={(t) => update({ business_phone: t })}
+            placeholder="+919160442323"
+            placeholderTextColor={colors.onSurfaceSecondary}
+            style={styles.input}
+            keyboardType="phone-pad"
+          />
+          <Text style={styles.label}>Minimum wallet deposit (₹)</Text>
+          <TextInput
+            testID="min-deposit-input"
+            keyboardType="numeric"
+            value={String(s.min_deposit ?? 2000)}
+            onChangeText={(t) => update({ min_deposit: Number(t.replace(/[^0-9.]/g, "")) || 0 })}
+            style={styles.input}
+            placeholderTextColor={colors.onSurfaceSecondary}
+          />
+        </View>
+
+        {/* Pickup / Drop-off */}
+        <Text style={styles.section}>Pickup & Drop-off Location</Text>
+        <View style={[styles.card, shadow.card]}>
+          <Text style={styles.label}>Address (shown to customers)</Text>
+          <TextInput
+            testID="pickup-address-input"
+            value={s.pickup_address || ""}
+            onChangeText={(t) => update({ pickup_address: t })}
+            placeholder="Vemula Rentals — Pickup Point"
+            placeholderTextColor={colors.onSurfaceSecondary}
+            style={[styles.input, { height: undefined, minHeight: 56, paddingVertical: spacing.md, textAlignVertical: "top" }]}
+            multiline
+          />
+          <View style={{ flexDirection: "row", gap: spacing.md }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Latitude</Text>
+              <TextInput
+                testID="pickup-lat-input"
+                keyboardType="numeric"
+                value={String(s.pickup_lat ?? 17.527688)}
+                onChangeText={(t) => update({ pickup_lat: Number(t.replace(/[^0-9.\-]/g, "")) || 0 })}
+                style={styles.input}
+                placeholderTextColor={colors.onSurfaceSecondary}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Longitude</Text>
+              <TextInput
+                testID="pickup-lng-input"
+                keyboardType="numeric"
+                value={String(s.pickup_lng ?? 78.394619)}
+                onChangeText={(t) => update({ pickup_lng: Number(t.replace(/[^0-9.\-]/g, "")) || 0 })}
+                style={styles.input}
+                placeholderTextColor={colors.onSurfaceSecondary}
+              />
+            </View>
+          </View>
+          <Text style={styles.hint}>The map button on the customer Home & Vehicle screens opens these coordinates in Google Maps / Apple Maps.</Text>
         </View>
 
         <Pressable testID="save-settings-button" onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.85 }, saving && { opacity: 0.5 }]}>

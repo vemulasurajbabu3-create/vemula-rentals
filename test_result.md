@@ -307,3 +307,66 @@ backend_iter4_results:
 agent_communication_iter4:
   - agent: "testing"
     message: "Iteration 4 GREEN end-to-end. Backend 6/6 pytest pass; frontend customer + admin flows verified on 390x844. Only nice-to-have: surface inline error in confirm-return-sheet when backend returns 412 over-refund. No retest needed."
+
+iteration_6_results:
+  - task: "Backend: /settings/public exposure + admin settings PUT validation (merchant_upi/lat/lng)"
+    file: "/app/backend/server.py"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS (iter6) — GET /settings/public returns merchant_upi, merchant_name, business_phone, pickup_address, pickup_lat, pickup_lng for approved customers. PUT /admin/settings accepts valid values and rejects merchant_upi='nodomain' (400), pickup_lat=999 (400), pickup_lng=-200 (400). pytest 11/11."
+
+  - task: "Backend: per-user weekly cadence (assign + cash)"
+    file: "/app/backend/server.py"
+    needs_retesting: true
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS (iter6) — On POST /vehicles/assign, first pending due_date = rental_start_date + 7d (within 2s tolerance). On POST /admin/payments/{pid}/mark-paid-cash, new pending due_date = prev_due + 7d, payment_method=cash, transaction_id starts with CASH-, notification 'Payment Received (Cash)' created."
+      - working: false
+        agent: "testing"
+        comment: "BUG (iter6) — POST /api/payments/{pid}/mark-paid (UPI path) still uses datetime.now()+7d for next pending due_date (server.py L591). Per spec, it must anchor to prev_due+7d like the cash path. Cadence drifts when customer pays late via UPI."
+
+  - task: "Frontend: PickupAddressCard on customer home and vehicle screens"
+    file: "/app/frontend/src/components/PickupAddressCard.tsx"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS (iter6) — testID='pickup-address-card' renders on /customer/home and /customer/vehicle (above 'Rental Info'). Coords '17.52769, 78.39462' visible. Pressing 'Directions' invoked Linking.openURL with 'https://www.google.com/maps/search/?api=1&query=17.527688,78.394619'. 'Call' button uses settings.business_phone."
+
+  - task: "Frontend: Admin Settings new inputs + save round-trip"
+    file: "/app/frontend/app/admin/settings.tsx"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS (iter6) — All 7 testIDs present: merchant-upi-input, merchant-name-input, business-phone-input, min-deposit-input, pickup-address-input, pickup-lat-input, pickup-lng-input + save-settings-button. Changed merchant_upi to 'test.upi@upi' via UI → reload → GET /admin/settings confirmed → restored to 'vemula.balajee@ybl'."
+
+  - task: "Frontend: Customer Payments uses settings.merchant_upi (B3)"
+    file: "/app/frontend/app/customer/payments.tsx"
+    needs_retesting: true
+    priority: medium
+    status_history:
+      - working: "NA"
+        agent: "testing"
+        comment: "PARTIAL (iter6) — 'Pay Now' click opens 'Confirm UPI Payment' modal (openUpi handler triggered). Could not intercept Linking.openURL URL on web (used window.open patch, no capture). Wiring in code is correct: payments.tsx loads /settings/public and sets merchantUpi=s.merchant_upi (L42). Recommend adding testID='quick-pay-upi-button' for cleaner E2E."
+
+  - task: "Frontend: Admin Payments Mark Paid (Cash) button (B4)"
+    file: "/app/frontend/app/admin/payments.tsx"
+    needs_retesting: true
+    priority: high
+    status_history:
+      - working: "NA"
+        agent: "testing"
+        comment: "PARTIAL (iter6) — testID='mark-cash-paid-button' is present and gated on payment.status==='pending' (L201-202). Could not open the edit modal reliably via Playwright because the row Pressable lacks a stable testID (only the small pencil icon is the trigger). Backend endpoint /admin/payments/{pid}/mark-paid-cash fully verified by pytest. Action: add testID={`payment-row-${p.id}`} to the row Pressable."
+
+agent_communication_iter6:
+  - agent: "testing"
+    message: "Iteration 6: backend pytest 11/11 PASS (test_payments_cash_cadence.py). Frontend B1/B2/B5 GREEN. B3/B4 partially verified — code wiring + backend correct; frontend testIDs missing on some Pressables. ONE BACKEND BUG: UPI mark-paid still uses now+7d for next pending due_date instead of prev_due+7d (spec A5 violation). merchant_upi restored to 'vemula.balajee@ybl' at end of run. Screenshots in /app/test_reports/screens/it6/."
+

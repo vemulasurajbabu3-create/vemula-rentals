@@ -8,6 +8,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
+import PickupAddressCard from "@/src/components/PickupAddressCard";
 
 export default function VehicleScreen() {
   const [vehicle, setVehicle] = useState<any | null>(null);
@@ -87,6 +88,9 @@ export default function VehicleScreen() {
         </View>
 
         <View style={styles.content}>
+          <Text style={styles.sectionTitle}>Pickup & Drop-off</Text>
+          <PickupAddressCard />
+
           <Text style={styles.sectionTitle}>Rental Info</Text>
           <View style={[styles.grid, shadow.card]}>
             <Spec label="Weekly Rent" value={`₹${vehicle.weekly_rent}`} icon="cash-outline" />

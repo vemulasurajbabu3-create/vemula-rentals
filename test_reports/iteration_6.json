@@ -1,0 +1,79 @@
+{
+  "summary": "Iteration 6: Backend pytest suite (11/11 PASS) covers public settings exposure, admin settings PUT validation (merchant_upi must contain '@', lat/lng ranges), per-user weekly cadence on assign (first due = start+7d), UPI mark-paid creates next pending, and cash mark-paid endpoint anchored to prev_due+7d with notification + cash txn id starting CASH-. Frontend (Expo web preview) verified: B1 customer home renders pickup-address-card with seeded address+coords and Directions opens https://www.google.com/maps/...?query=17.527688,78.394619; B2 /customer/vehicle renders pickup card above 'Rental Info'; B5 admin /admin/settings shows all 7 new testIDs and save+reload round-trip for merchant-upi works (changed to test.upi@upi then restored to vemula.balajee@ybl). B3 (customer payments openUpi) and B4 (admin payments cash button) partially verified — modal opens / wiring is correct in code, but Playwright selectors could not 100% complete the click path (see issues). Deprecated style warnings observed but not blocking. merchant_upi has been restored to 'vemula.balajee@ybl' at end of run.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/payments/{pid}/mark-paid",
+        "issue": "Spec A5 requires next pending due_date = previous due_date + 7d for BOTH UPI and cash mark-paid. server.py line 591 uses datetime.now(timezone.utc) + timedelta(days=7) for the UPI path — so weekly cadence drifts every time a UPI payment is recorded late. Only admin_mark_cash_paid uses prev_due + 7d correctly.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "admin/payments.tsx row press",
+        "issue": "Pending payment list rows do not expose a stable testID for the row Pressable (only the pencil icon has 'edit'). Playwright could not reliably open the edit modal to verify the mark-cash-paid-button click path. Backend endpoint itself is verified (11/11 tests).",
+        "testID": "<missing on row Pressable>",
+        "priority": "LOW"
+      },
+      {
+        "component": "customer/payments.tsx 'Pay Now' / 'Quick Pay via UPI'",
+        "issue": "Prominent action buttons (Pay Now, Quick Pay via UPI) lack stable testID (e.g. 'quick-pay-upi-button', 'pay-now-button'). They work — the UPI confirmation modal opens — but it makes integration tests harder.",
+        "testID": "<missing>",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Multiple",
+        "issues": [
+          "Console warnings: 'props.pointerEvents is deprecated. Use style.pointerEvents' (react-native-web migration warning).",
+          "Console warnings: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' from src/theme shadow.card on react-native-web."
+        ]
+      }
+    ],
+    "react_native_issues": [
+      {
+        "component": "expo / expo-font / expo-router (package.json)",
+        "issue": "Expo CLI reports version drift: expo@54.0.34 expected 54.0.35; expo-font@14.0.11 expected 14.0.12; expo-router@6.0.23 expected 6.0.24. Bump these. Reference: /app/frontend/package.json"
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payments_cash_cadence.py",
+    "/app/test_reports/pytest/it6_results.xml",
+    "/app/test_reports/screens/it6/b1_home_pickup.jpeg",
+    "/app/test_reports/screens/it6/b2_vehicle_pickup.jpeg",
+    "/app/test_reports/screens/it6/b3_pay_modal_v2.jpeg",
+    "/app/test_reports/screens/it6/b4_modal.jpeg",
+    "/app/test_reports/screens/it6/b5_admin_settings.jpeg"
+  ],
+  "action_items": [
+    "FIX (HIGH): In POST /api/payments/{pid}/mark-paid (server.py ~L591), compute next due_date from the paid payment's previous due_date + 7 days, mirroring admin_mark_cash_paid logic, so per-user weekly cadence holds for UPI payments too. Currently it uses now+7d.",
+    "ADD testID to row Pressable in /app/frontend/app/admin/payments.tsx (e.g. testID={`payment-row-${p.id}`}) so the Mark Paid (Cash) flow is reachable via automated tests.",
+    "ADD testID to 'Quick Pay via UPI' / 'Pay Now' Pressables in /app/frontend/app/customer/payments.tsx (e.g. testID='quick-pay-upi-button') for B3-style E2E coverage.",
+    "Bump expo/expo-font/expo-router patch versions to clear Metro warnings.",
+    "Migrate deprecated 'shadow*' props in src/theme to 'boxShadow' (react-native-web)."
+  ],
+  "critical_code_review_comments": [
+    "server.py weekly-cadence cash path correctly uses prev_due+7d (lines 700-720), but UPI mark-paid path (lines 589-596) still uses now+7d — inconsistent with spec.",
+    "Payment.payment_method optional field is in the model; UPI path now sets it to 'upi' on mark-paid (good). Cash sets 'cash' (good).",
+    "GET /settings/public correctly gates on approved_user; pending customers will not see pickup card (acceptable).",
+    "PickupAddressCard.tsx safely returns null when /settings/public throws — but a pending or unauthenticated user will silently see no card. Consider rendering a static fallback for unauth/pending cases."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_payments_cash_cadence.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11)",
+    "frontend": "B1 PASS, B2 PASS, B5 PASS; B3/B4 partial (wiring verified in code+backend, UI click path could not be 100% automated due to missing testIDs)"
+  },
+  "seed_data_creation": "Tests provision throwaway customers (random 10-digit phones starting 7/8) and TEST_-prefixed vehicles. merchant_upi is restored to 'vemula.balajee@ybl' and lat/lng to 17.527688/78.394619 at the end of every PUT-settings test and the explicit Cleanup test.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Re-run /app/backend/tests/test_payments_cash_cadence.py after main agent fixes the UPI cadence bug. Also re-run frontend B3/B4 once row + pay-button testIDs are added. The cash endpoint and notification path are already verified end-to-end.",
+  "rca_of_issue": "Spec A5: 'next pending due_date = previous due_date + 7 days' for ANY mark-paid call. server.py:591 computes due = datetime.now(timezone.utc) + timedelta(days=7) for the UPI path, NOT previous_due + 7d. As a result, if a user pays late, their weekly anchor day shifts forward. Cash path at lines 700-717 does it correctly (prev_due_dt + timedelta(days=7)). Fix: in mark_payment_paid, parse p['due_date'] and use prev_due + 7d (with tzinfo fallback to utc), matching admin_mark_cash_paid. Reproduction: assign vehicle at Wed 14:00 UTC → first pending due Wed+7. Pay UPI on Fri → next due is Fri+7 instead of next Wed."
+}
