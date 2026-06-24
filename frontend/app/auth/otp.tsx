@@ -37,7 +37,7 @@ export default function Otp() {
     if (otp.length !== 6) { setError("Enter all 6 digits"); return; }
     setLoading(true);
     try {
-      const res = await api<{ token: string; is_admin: boolean; user_id: string; is_new_user: boolean }>(
+      const res = await api<{ token: string; is_admin: boolean; user_id: string; is_new_user: boolean; status?: string }>(
         "/auth/verify-otp",
         { method: "POST", body: { phone, otp }, auth: false }
       );
@@ -45,6 +45,7 @@ export default function Otp() {
       await setStoredIsAdmin(res.is_admin);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       if (res.is_admin) router.replace("/admin/dashboard");
+      else if (res.status && res.status !== "approved") router.replace("/auth/pending");
       else router.replace("/customer/home");
     } catch (e: any) {
       setError(e.message || "Verification failed");

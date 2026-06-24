@@ -12,8 +12,17 @@ export default function Index() {
       const token = await storage.secureGet<string>("token", "");
       const isAdmin = await storage.getItem<boolean>("is_admin", false);
       if (token) {
-        if (isAdmin) router.replace("/admin/dashboard");
-        else router.replace("/customer/home");
+        if (isAdmin) { router.replace("/admin/dashboard"); return; }
+        // Verify approval status before going to customer home
+        try {
+          const me = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ""}/api/users/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }).then((r) => r.json());
+          if (me && me.status && me.status !== "approved") router.replace("/auth/pending");
+          else router.replace("/customer/home");
+        } catch {
+          router.replace("/customer/home");
+        }
       } else {
         router.replace("/auth/login");
       }

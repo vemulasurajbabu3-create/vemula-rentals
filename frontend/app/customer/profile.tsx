@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, clearAuth } from "@/src/api/client";
+import BusinessContact from "@/src/components/BusinessContact";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
 export default function Profile() {
@@ -75,6 +76,10 @@ export default function Profile() {
           <Ionicons name="log-out-outline" size={22} color={colors.error} />
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
+
+        <View style={{ marginTop: spacing.xl }}>
+          <BusinessContact />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

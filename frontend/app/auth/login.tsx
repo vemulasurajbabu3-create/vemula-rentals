@@ -40,7 +40,7 @@ export default function Login() {
           <View style={styles.logoCircle}>
             <Ionicons name="bicycle" size={36} color={colors.onBrandPrimary} />
           </View>
-          <Text style={styles.brand}>RideLease</Text>
+          <Text style={styles.brand}>Vemula Rentals</Text>
           <Text style={styles.tagline}>Your weekly ride, simplified.</Text>
         </LinearGradient>
 

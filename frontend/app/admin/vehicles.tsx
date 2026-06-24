@@ -87,6 +87,7 @@ function VehicleSheet({ visible, initial, onClose, onSaved }: { visible: boolean
   const [model, setModel] = useState(initial?.model || "");
   const [plate, setPlate] = useState(initial?.number_plate || "");
   const [rent, setRent] = useState(String(initial?.weekly_rent || ""));
+  const [deposit, setDeposit] = useState(String(initial?.security_deposit ?? "2000"));
   const [imageUrl, setImageUrl] = useState(initial?.image_url || "");
   const [instructions, setInstructions] = useState((initial?.instructions || []).join("\n"));
   const [saving, setSaving] = useState(false);
@@ -96,6 +97,7 @@ function VehicleSheet({ visible, initial, onClose, onSaved }: { visible: boolean
     try {
       const body = {
         vehicle_type: vt, model, number_plate: plate, weekly_rent: Number(rent) || 0,
+        security_deposit: Number(deposit) || 0,
         image_url: imageUrl || null,
         instructions: instructions.split("\n").map((s) => s.trim()).filter(Boolean),
       };
@@ -119,6 +121,7 @@ function VehicleSheet({ visible, initial, onClose, onSaved }: { visible: boolean
             <Field label="Model" value={model} onChange={setModel} testID="field-model" />
             <Field label="Number Plate" value={plate} onChange={setPlate} testID="field-plate" />
             <Field label="Weekly Rent (₹)" value={rent} onChange={setRent} testID="field-rent" keyboardType="numeric" />
+            <Field label="Security Deposit (₹)" value={deposit} onChange={setDeposit} testID="field-deposit" keyboardType="numeric" />
             <Field label="Image URL (optional)" value={imageUrl} onChange={setImageUrl} testID="field-image" />
             <Field label="Instructions (one per line)" value={instructions} onChange={setInstructions} testID="field-instructions" multiline />
             <Pressable testID="save-vehicle-button" onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.85 }, saving && { opacity: 0.5 }]}>

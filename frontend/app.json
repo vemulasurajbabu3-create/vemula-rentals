@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "RideLease",
+    "name": "Vemula Rentals",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "ridelease",
+    "scheme": "vemularentals",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -42,16 +42,16 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow RideLease to use your location for rental tracking.",
-          "locationWhenInUsePermission": "Allow RideLease to use your location for rental tracking.",
+          "locationAlwaysAndWhenInUsePermission": "Allow Vemula Rentals to use your location for rental tracking.",
+          "locationWhenInUsePermission": "Allow Vemula Rentals to use your location for rental tracking.",
           "isAndroidBackgroundLocationEnabled": true
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow RideLease to access your photos to upload KYC documents.",
-          "cameraPermission": "Allow RideLease to access your camera to capture documents."
+          "photosPermission": "Allow Vemula Rentals to access your photos to upload KYC documents.",
+          "cameraPermission": "Allow Vemula Rentals to access your camera to capture documents."
         }
       ],
       [

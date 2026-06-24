@@ -24,6 +24,8 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get("JWT_SECRET", "ridelease-dev-secret-change-me")
 JWT_ALG = "HS256"
 ADMIN_PHONE = "9999999999"  # special admin phone
+BUSINESS_PHONE = "9160442323"  # owner contact - calls & messages
+BUSINESS_NAME = "Vemula Rentals"
 
 app = FastAPI(title="RideLease API")
 api_router = APIRouter(prefix="/api")
@@ -48,6 +50,7 @@ class TokenOut(BaseModel):
     user_id: str
     is_admin: bool
     is_new_user: bool
+    status: str = "approved"
 
 
 class UserProfile(BaseModel):
@@ -56,6 +59,7 @@ class UserProfile(BaseModel):
     full_name: Optional[str] = None
     address: Optional[str] = None
     is_admin: bool = False
+    status: str = "approved"  # pending | approved | rejected
     created_at: str
 
 
@@ -75,7 +79,8 @@ class Vehicle(BaseModel):
     model: str
     number_plate: str
     weekly_rent: float
-    status: str = "available"  # available | rented | maintenance
+    security_deposit: float = 2000.0
+    status: str = "available"  # available | rented | maintenance | blocked
     assigned_to: Optional[str] = None  # user_id
     rental_start_date: Optional[str] = None
     instructions: List[str] = []
@@ -88,6 +93,7 @@ class VehicleCreate(BaseModel):
     model: str
     number_plate: str
     weekly_rent: float
+    security_deposit: float = 2000.0
     instructions: List[str] = []
     image_url: Optional[str] = None
 
@@ -97,6 +103,7 @@ class VehicleUpdate(BaseModel):
     model: Optional[str] = None
     number_plate: Optional[str] = None
     weekly_rent: Optional[float] = None
+    security_deposit: Optional[float] = None
     status: Optional[str] = None
     instructions: Optional[List[str]] = None
     image_url: Optional[str] = None
@@ -123,6 +130,14 @@ class Payment(BaseModel):
 
 class PaymentMarkPaid(BaseModel):
     transaction_id: str
+
+
+class PaymentAdminUpdate(BaseModel):
+    amount: Optional[float] = None
+    late_fee: Optional[float] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = None  # pending | paid | failed
+    transaction_id: Optional[str] = None
 
 
 class Document(BaseModel):
@@ -163,10 +178,11 @@ class NotificationCreate(BaseModel):
 
 
 class SettingsModel(BaseModel):
-    reminder_weekday: int = 0  # 0=Monday ... 6=Sunday
-    reminder_hour_ist: int = 9  # 0-23, IST hour
-    late_fee_per_day: float = 50.0  # ₹ per day overdue
-    grace_days: int = 0  # no fee for first N days late
+    reminder_weekday: int = 0
+    reminder_hour_ist: int = 9
+    late_fee_per_day: float = 50.0
+    grace_days: int = 0
+    block_after_days: int = 7  # auto-suspend vehicle after N days overdue
 
 
 class SettingsUpdate(BaseModel):
@@ -174,6 +190,34 @@ class SettingsUpdate(BaseModel):
     reminder_hour_ist: Optional[int] = None
     late_fee_per_day: Optional[float] = None
     grace_days: Optional[int] = None
+    block_after_days: Optional[int] = None
+
+
+class Deposit(BaseModel):
+    id: str
+    user_id: str
+    vehicle_id: Optional[str] = None
+    amount: float
+    status: str  # pending | paid | forfeited | refunded
+    transaction_id: Optional[str] = None
+    paid_at: Optional[str] = None
+    forfeit_reason: Optional[str] = None
+    forfeit_at: Optional[str] = None
+    created_at: str
+
+
+class DepositCreate(BaseModel):
+    amount: float
+    vehicle_id: Optional[str] = None
+
+
+class DepositMarkPaid(BaseModel):
+    transaction_id: str
+
+
+class ForfeitIn(BaseModel):
+    amount: float
+    reason: str
 
 
 # -------------------- AUTH HELPERS --------------------
@@ -198,6 +242,21 @@ async def current_user(authorization: Optional[str] = Header(None)) -> dict:
     user = await db.users.find_one({"id": payload["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # Backfill legacy users without status field
+    if "status" not in user:
+        user["status"] = "approved"
+    return user
+
+
+async def approved_user(user: dict = Depends(current_user)) -> dict:
+    """Gate non-admin endpoints — pending/rejected customers cannot access app data."""
+    if user.get("is_admin"):
+        return user
+    s = user.get("status", "approved")
+    if s == "pending":
+        raise HTTPException(status_code=403, detail={"code": "pending_approval", "message": "Your account is awaiting approval from the business."})
+    if s == "rejected":
+        raise HTTPException(status_code=403, detail={"code": "rejected", "message": "Your account has been rejected. Please contact the business."})
     return user
 
 
@@ -232,23 +291,44 @@ async def request_otp(body: PhoneIn):
 async def verify_otp(body: OtpVerifyIn):
     if not (body.otp.isdigit() and len(body.otp) == 6):
         raise HTTPException(status_code=400, detail="OTP must be 6 digits")
-    # Dev mode: accept any 6 digit code
     user = await db.users.find_one({"phone": body.phone}, {"_id": 0})
     is_new = False
     if not user:
+        is_admin = body.phone == ADMIN_PHONE
         user = {
             "id": str(uuid.uuid4()),
             "phone": body.phone,
             "full_name": None,
             "address": None,
-            "is_admin": body.phone == ADMIN_PHONE,
+            "is_admin": is_admin,
+            "status": "approved" if is_admin else "pending",
             "last_location": None,
             "created_at": now_utc_iso(),
         }
         await db.users.insert_one(dict(user))
+        if not is_admin:
+            await db.notifications.insert_one({
+                "id": str(uuid.uuid4()), "user_id": None,
+                "title": "New Customer Signup",
+                "body": f"+91 {body.phone} has signed up and is waiting for approval.",
+                "read": False, "created_at": now_utc_iso(),
+            })
         is_new = True
+    # Backfill status field for legacy users
+    if "status" not in user:
+        legacy_status = "approved"  # existing users grandfathered
+        await db.users.update_one({"id": user["id"]}, {"$set": {"status": legacy_status}})
+        user["status"] = legacy_status
     token = create_token(user["id"], user["phone"], user.get("is_admin", False))
-    return TokenOut(token=token, user_id=user["id"], is_admin=user.get("is_admin", False), is_new_user=is_new)
+    return TokenOut(
+        token=token, user_id=user["id"], is_admin=user.get("is_admin", False),
+        is_new_user=is_new, status=user.get("status", "approved"),
+    )
+
+
+@api_router.get("/business-info")
+async def business_info():
+    return {"name": BUSINESS_NAME, "phone": BUSINESS_PHONE}
 
 
 # -------------------- USER ROUTES --------------------
@@ -257,6 +337,7 @@ async def get_me(user: dict = Depends(current_user)):
     return UserProfile(**{
         "id": user["id"], "phone": user["phone"], "full_name": user.get("full_name"),
         "address": user.get("address"), "is_admin": user.get("is_admin", False),
+        "status": user.get("status", "approved"),
         "created_at": user["created_at"],
     })
 
@@ -270,12 +351,13 @@ async def update_me(body: UserUpdate, user: dict = Depends(current_user)):
     return UserProfile(**{
         "id": u["id"], "phone": u["phone"], "full_name": u.get("full_name"),
         "address": u.get("address"), "is_admin": u.get("is_admin", False),
+        "status": u.get("status", "approved"),
         "created_at": u["created_at"],
     })
 
 
 @api_router.post("/users/me/location")
-async def update_location(body: LocationIn, user: dict = Depends(current_user)):
+async def update_location(body: LocationIn, user: dict = Depends(approved_user)):
     loc = {"latitude": body.latitude, "longitude": body.longitude, "updated_at": now_utc_iso()}
     await db.users.update_one({"id": user["id"]}, {"$set": {"last_location": loc}})
     await db.location_history.insert_one({
@@ -285,7 +367,7 @@ async def update_location(body: LocationIn, user: dict = Depends(current_user)):
 
 
 @api_router.get("/users/me/vehicle")
-async def get_my_vehicle(user: dict = Depends(current_user)):
+async def get_my_vehicle(user: dict = Depends(approved_user)):
     v = await db.vehicles.find_one({"assigned_to": user["id"]}, {"_id": 0})
     return v
 
@@ -328,12 +410,26 @@ async def delete_vehicle(vid: str, _: dict = Depends(admin_required)):
 
 @api_router.post("/vehicles/assign")
 async def assign_vehicle(body: AssignIn, _: dict = Depends(admin_required)):
-    # Validate target vehicle exists FIRST (and is available or already assigned to this user)
     veh = await db.vehicles.find_one({"id": body.vehicle_id}, {"_id": 0})
     if not veh:
         raise HTTPException(status_code=404, detail="Vehicle not found")
     if veh.get("assigned_to") and veh["assigned_to"] != body.user_id:
         raise HTTPException(status_code=409, detail="Vehicle already assigned to another user")
+    # Security deposit gate
+    required_deposit = float(veh.get("security_deposit", 0))
+    if required_deposit > 0:
+        balance = await get_user_deposit_balance(body.user_id)
+        if balance < required_deposit:
+            shortfall = round(required_deposit - balance, 2)
+            raise HTTPException(
+                status_code=412,
+                detail={
+                    "message": f"Security deposit not paid. Required ₹{required_deposit:.0f}, paid ₹{balance:.0f}. Shortfall ₹{shortfall:.0f}.",
+                    "required_deposit": required_deposit,
+                    "current_balance": balance,
+                    "shortfall": shortfall,
+                },
+            )
     # Unassign any vehicle currently assigned to user (other than the target)
     await db.vehicles.update_many(
         {"assigned_to": body.user_id, "id": {"$ne": body.vehicle_id}},
@@ -344,16 +440,19 @@ async def assign_vehicle(body: AssignIn, _: dict = Depends(admin_required)):
         {"id": body.vehicle_id},
         {"$set": {"assigned_to": body.user_id, "status": "rented", "rental_start_date": start}},
     )
-    # Create first pending payment if none exists
+    # Tag deposits for cleaner forfeit tracking
+    await db.deposits.update_many(
+        {"user_id": body.user_id, "status": "paid", "vehicle_id": None},
+        {"$set": {"vehicle_id": body.vehicle_id}},
+    )
     existing = await db.payments.find_one({"user_id": body.user_id, "status": "pending"}, {"_id": 0})
     if not existing:
         due = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         await db.payments.insert_one({
             "id": str(uuid.uuid4()), "user_id": body.user_id, "vehicle_id": body.vehicle_id,
-            "amount": veh["weekly_rent"], "due_date": due, "status": "pending",
+            "amount": veh["weekly_rent"], "late_fee": 0.0, "due_date": due, "status": "pending",
             "transaction_id": None, "paid_at": None, "created_at": now_utc_iso(),
         })
-    # Notify user
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "user_id": body.user_id,
         "title": "Vehicle Assigned",
@@ -365,7 +464,7 @@ async def assign_vehicle(body: AssignIn, _: dict = Depends(admin_required)):
 
 # -------------------- PAYMENT ROUTES --------------------
 @api_router.get("/payments/me", response_model=List[Payment])
-async def list_my_payments(user: dict = Depends(current_user)):
+async def list_my_payments(user: dict = Depends(approved_user)):
     # Recompute late fees on read so amounts are always current
     await _compute_late_fees_once()
     items = await db.payments.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
@@ -373,7 +472,7 @@ async def list_my_payments(user: dict = Depends(current_user)):
 
 
 @api_router.post("/payments/{pid}/mark-paid", response_model=Payment)
-async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depends(current_user)):
+async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depends(approved_user)):
     # Ensure late fee is current before marking paid
     await _compute_late_fees_once()
     p = await db.payments.find_one({"id": pid, "user_id": user["id"]}, {"_id": 0})
@@ -395,6 +494,28 @@ async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depend
             "amount": veh["weekly_rent"], "late_fee": 0.0, "due_date": due, "status": "pending",
             "transaction_id": None, "paid_at": None, "created_at": now_utc_iso(),
         })
+        # Unblock the vehicle if it was suspended due to this payment
+        if veh.get("status") == "blocked":
+            still_overdue = await db.payments.find_one({"user_id": user["id"], "status": "pending"}, {"_id": 0})
+            # Only unblock if no other pending payment is overdue today
+            unblock = True
+            if still_overdue:
+                try:
+                    due_dt = datetime.fromisoformat(still_overdue["due_date"])
+                    if due_dt.tzinfo is None:
+                        due_dt = due_dt.replace(tzinfo=timezone.utc)
+                    if due_dt.date() < datetime.now(timezone.utc).date():
+                        unblock = False
+                except Exception:
+                    pass
+            if unblock:
+                await db.vehicles.update_one({"id": veh["id"]}, {"$set": {"status": "rented"}})
+                await db.notifications.insert_one({
+                    "id": str(uuid.uuid4()), "user_id": user["id"],
+                    "title": "Vehicle Reactivated",
+                    "body": "Your vehicle is active again. Ride safe!",
+                    "read": False, "created_at": now_utc_iso(),
+                })
     # Notify admin
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "user_id": None,
@@ -407,14 +528,51 @@ async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depend
 
 
 @api_router.get("/admin/payments", response_model=List[Payment])
-async def admin_list_payments(_: dict = Depends(admin_required)):
-    items = await db.payments.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+async def admin_list_payments(q: Optional[str] = None, status: Optional[str] = None, _: dict = Depends(admin_required)):
+    await _compute_late_fees_once()
+    query: dict = {}
+    if status:
+        query["status"] = status
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        # match by transaction id directly, or by users whose name/phone match
+        matched_users = await db.users.find({"$or": [{"full_name": rx}, {"phone": rx}]}, {"_id": 0, "id": 1}).to_list(500)
+        uids = [u["id"] for u in matched_users]
+        query["$or"] = [{"transaction_id": rx}]
+        if uids:
+            query["$or"].append({"user_id": {"$in": uids}})
+    items = await db.payments.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return [Payment(**i) for i in items]
+
+
+@api_router.put("/admin/payments/{pid}", response_model=Payment)
+async def admin_edit_payment(pid: str, body: PaymentAdminUpdate, _: dict = Depends(admin_required)):
+    upd = {k: v for k, v in body.dict().items() if v is not None}
+    if "status" in upd and upd["status"] not in ("pending", "paid", "failed"):
+        raise HTTPException(status_code=400, detail="status must be pending|paid|failed")
+    if "amount" in upd and upd["amount"] < 0:
+        raise HTTPException(status_code=400, detail="amount must be >= 0")
+    if "late_fee" in upd and upd["late_fee"] < 0:
+        raise HTTPException(status_code=400, detail="late_fee must be >= 0")
+    if upd.get("status") == "paid":
+        upd["paid_at"] = now_utc_iso()
+    if upd:
+        await db.payments.update_one({"id": pid}, {"$set": upd})
+    p = await db.payments.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return Payment(**p)
+
+
+@api_router.delete("/admin/payments/{pid}")
+async def admin_delete_payment(pid: str, _: dict = Depends(admin_required)):
+    await db.payments.delete_one({"id": pid})
+    return {"ok": True}
 
 
 # -------------------- DOCUMENT ROUTES --------------------
 @api_router.post("/documents", response_model=Document)
-async def upload_document(body: DocumentCreate, user: dict = Depends(current_user)):
+async def upload_document(body: DocumentCreate, user: dict = Depends(approved_user)):
     doc = Document(
         id=str(uuid.uuid4()), user_id=user["id"], doc_type=body.doc_type,
         name=body.name, base64_data=body.base64_data, mime_type=body.mime_type,
@@ -425,13 +583,13 @@ async def upload_document(body: DocumentCreate, user: dict = Depends(current_use
 
 
 @api_router.get("/documents/me", response_model=List[Document])
-async def list_my_docs(user: dict = Depends(current_user)):
+async def list_my_docs(user: dict = Depends(approved_user)):
     items = await db.documents.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
     return [Document(**i) for i in items]
 
 
 @api_router.delete("/documents/{did}")
-async def delete_my_doc(did: str, user: dict = Depends(current_user)):
+async def delete_my_doc(did: str, user: dict = Depends(approved_user)):
     await db.documents.delete_one({"id": did, "user_id": user["id"]})
     return {"ok": True}
 
@@ -455,7 +613,7 @@ async def admin_review_doc(did: str, body: DocumentReview, _: dict = Depends(adm
 
 # -------------------- NOTIFICATIONS --------------------
 @api_router.get("/notifications/me", response_model=List[Notification])
-async def list_my_notifications(user: dict = Depends(current_user)):
+async def list_my_notifications(user: dict = Depends(approved_user)):
     items = await db.notifications.find(
         {"$or": [{"user_id": user["id"]}, {"user_id": None}]}, {"_id": 0}
     ).sort("created_at", -1).to_list(100)
@@ -463,7 +621,7 @@ async def list_my_notifications(user: dict = Depends(current_user)):
 
 
 @api_router.post("/notifications/me/read-all")
-async def mark_all_read(user: dict = Depends(current_user)):
+async def mark_all_read(user: dict = Depends(approved_user)):
     await db.notifications.update_many(
         {"$or": [{"user_id": user["id"]}, {"user_id": None}]}, {"$set": {"read": True}}
     )
@@ -482,15 +640,45 @@ async def admin_create_notification(body: NotificationCreate, _: dict = Depends(
 
 # -------------------- ADMIN: USERS & STATS --------------------
 @api_router.get("/admin/users")
-async def admin_list_users(_: dict = Depends(admin_required)):
-    items = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    # Enrich with assigned vehicle
+async def admin_list_users(q: Optional[str] = None, status: Optional[str] = None, _: dict = Depends(admin_required)):
+    query: dict = {}
+    if status:
+        query["status"] = status
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"full_name": rx}, {"phone": rx}, {"address": rx}]
+    items = await db.users.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     out = []
     for u in items:
         v = await db.vehicles.find_one({"assigned_to": u["id"]}, {"_id": 0})
         u["assigned_vehicle"] = v
+        u["deposit_balance"] = await get_user_deposit_balance(u["id"])
+        if "status" not in u:
+            u["status"] = "approved"
         out.append(u)
     return out
+
+
+@api_router.post("/admin/users/{uid}/approve")
+async def admin_approve_user(uid: str, _: dict = Depends(admin_required)):
+    res = await db.users.update_one({"id": uid}, {"$set": {"status": "approved"}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "user_id": uid,
+        "title": "Account Approved",
+        "body": "Your account has been approved. Welcome to Vemula Rentals!",
+        "read": False, "created_at": now_utc_iso(),
+    })
+    return {"ok": True}
+
+
+@api_router.post("/admin/users/{uid}/reject")
+async def admin_reject_user(uid: str, _: dict = Depends(admin_required)):
+    res = await db.users.update_one({"id": uid}, {"$set": {"status": "rejected"}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True}
 
 
 @api_router.get("/admin/stats")
@@ -527,6 +715,124 @@ async def admin_run_reminders(_: dict = Depends(admin_required)):
     return {"ok": True, "reminders_sent": count}
 
 
+# -------------------- DEPOSITS --------------------
+@api_router.get("/deposits/me")
+async def my_deposits(user: dict = Depends(approved_user)):
+    items = await db.deposits.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    balance = await get_user_deposit_balance(user["id"])
+    return {"balance": balance, "history": [Deposit(**d) for d in items]}
+
+
+@api_router.post("/deposits", response_model=Deposit)
+async def create_deposit(body: DepositCreate, user: dict = Depends(approved_user)):
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    d = Deposit(
+        id=str(uuid.uuid4()), user_id=user["id"], vehicle_id=body.vehicle_id,
+        amount=body.amount, status="pending", created_at=now_utc_iso(),
+    )
+    await db.deposits.insert_one(d.dict())
+    return d
+
+
+@api_router.post("/deposits/{did}/mark-paid", response_model=Deposit)
+async def mark_deposit_paid(did: str, body: DepositMarkPaid, user: dict = Depends(approved_user)):
+    d = await db.deposits.find_one({"id": did, "user_id": user["id"]}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Deposit not found")
+    if d["status"] == "paid":
+        return Deposit(**d)
+    if d["status"] != "pending":
+        raise HTTPException(status_code=409, detail=f"Deposit already {d['status']}")
+    await db.deposits.update_one(
+        {"id": did},
+        {"$set": {"status": "paid", "transaction_id": body.transaction_id, "paid_at": now_utc_iso()}},
+    )
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "user_id": None,
+        "title": "Security Deposit Received",
+        "body": f"₹{d['amount']:.0f} deposit from {user.get('full_name') or user['phone']} (txn {body.transaction_id})",
+        "read": False, "created_at": now_utc_iso(),
+    })
+    new_doc = await db.deposits.find_one({"id": did}, {"_id": 0})
+    return Deposit(**new_doc)
+
+
+@api_router.get("/admin/deposits")
+async def admin_list_deposits(_: dict = Depends(admin_required)):
+    items = await db.deposits.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [Deposit(**i) for i in items]
+
+
+@api_router.post("/admin/users/{user_id}/forfeit-deposit")
+async def admin_forfeit_deposit(user_id: str, body: ForfeitIn, _: dict = Depends(admin_required)):
+    """Forfeit up to `amount` from the user's paid deposit balance.
+    Applies to oldest paid deposits first (FIFO). Records reason on each forfeited deposit."""
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    paid = await db.deposits.find({"user_id": user_id, "status": "paid"}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    balance = round(sum(float(d["amount"]) for d in paid), 2)
+    if balance < body.amount:
+        raise HTTPException(status_code=412, detail=f"Insufficient deposit balance. Available ₹{balance:.0f}, requested ₹{body.amount:.0f}")
+    remaining = body.amount
+    forfeited_ids: List[str] = []
+    for d in paid:
+        if remaining <= 0:
+            break
+        amt = float(d["amount"])
+        if amt <= remaining + 0.001:
+            # Forfeit whole record
+            await db.deposits.update_one(
+                {"id": d["id"]},
+                {"$set": {"status": "forfeited", "forfeit_reason": body.reason, "forfeit_at": now_utc_iso()}},
+            )
+            forfeited_ids.append(d["id"])
+            remaining = round(remaining - amt, 2)
+        else:
+            # Split: shrink this record to (amt - remaining) and create a forfeited split for `remaining`
+            await db.deposits.update_one({"id": d["id"]}, {"$set": {"amount": round(amt - remaining, 2)}})
+            split = Deposit(
+                id=str(uuid.uuid4()), user_id=user_id, vehicle_id=d.get("vehicle_id"),
+                amount=remaining, status="forfeited",
+                transaction_id=d.get("transaction_id"), paid_at=d.get("paid_at"),
+                forfeit_reason=body.reason, forfeit_at=now_utc_iso(),
+                created_at=d["created_at"],
+            )
+            await db.deposits.insert_one(split.dict())
+            forfeited_ids.append(split.id)
+            remaining = 0
+    # Apply forfeited amount toward pending overdue payments (oldest first)
+    applied = body.amount
+    cursor = db.payments.find({"user_id": user_id, "status": "pending"}, {"_id": 0}).sort("due_date", 1)
+    async for p in cursor:
+        if applied <= 0:
+            break
+        total_due = float(p["amount"]) + float(p.get("late_fee", 0.0))
+        if total_due <= applied + 0.001:
+            await db.payments.update_one(
+                {"id": p["id"]},
+                {"$set": {"status": "paid", "transaction_id": f"FORFEIT-{body.reason[:20]}", "paid_at": now_utc_iso()}},
+            )
+            applied = round(applied - total_due, 2)
+        else:
+            new_amount = round(total_due - applied, 2)
+            # Apply against amount first, then late_fee
+            new_late = min(float(p.get("late_fee", 0.0)), new_amount)
+            new_rent = round(new_amount - new_late, 2)
+            await db.payments.update_one({"id": p["id"]}, {"$set": {"amount": new_rent, "late_fee": new_late}})
+            applied = 0
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()), "user_id": user_id,
+        "title": "Security Deposit Forfeited",
+        "body": f"₹{body.amount:.0f} of your security deposit has been forfeited. Reason: {body.reason}",
+        "read": False, "created_at": now_utc_iso(),
+    })
+    return {"ok": True, "forfeited_ids": forfeited_ids}
+
+
 @api_router.get("/admin/settings")
 async def admin_get_settings(_: dict = Depends(admin_required)):
     s = await get_settings_doc()
@@ -535,6 +841,7 @@ async def admin_get_settings(_: dict = Depends(admin_required)):
         "reminder_hour_ist": s.get("reminder_hour_ist", 9),
         "late_fee_per_day": s.get("late_fee_per_day", 50.0),
         "grace_days": s.get("grace_days", 0),
+        "block_after_days": s.get("block_after_days", 7),
     }
 
 
@@ -551,6 +858,8 @@ async def admin_update_settings(body: SettingsUpdate, _: dict = Depends(admin_re
             raise HTTPException(status_code=400, detail="late_fee_per_day must be >= 0")
         if "grace_days" in upd and upd["grace_days"] < 0:
             raise HTTPException(status_code=400, detail="grace_days must be >= 0")
+        if "block_after_days" in upd and upd["block_after_days"] < 0:
+            raise HTTPException(status_code=400, detail="block_after_days must be >= 0")
         await db.settings.update_one({"id": "global"}, {"$set": upd}, upsert=True)
         # Recompute fees immediately if fee/grace changed
         if "late_fee_per_day" in upd or "grace_days" in upd:
@@ -618,6 +927,7 @@ DEFAULT_SETTINGS = {
     "reminder_hour_ist": 9,
     "late_fee_per_day": 50.0,
     "grace_days": 0,
+    "block_after_days": 7,
 }
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -630,13 +940,21 @@ async def get_settings_doc() -> dict:
     return doc
 
 
+async def get_user_deposit_balance(user_id: str) -> float:
+    """Sum of paid deposits minus what has been forfeited/refunded."""
+    items = await db.deposits.find({"user_id": user_id, "status": "paid"}, {"_id": 0}).to_list(500)
+    return round(sum(float(d["amount"]) for d in items), 2)
+
+
 # -------------------- LATE FEE ENGINE --------------------
 async def _compute_late_fees_once():
-    """For each pending payment past due_date, set late_fee = max(0, days_overdue - grace) * late_fee_per_day.
-    Idempotent — re-runs simply recompute to the correct current value."""
+    """For each pending payment past due_date:
+    - set late_fee = max(0, days_overdue - grace) * late_fee_per_day
+    - auto-block vehicle when days_overdue > block_after_days"""
     settings = await get_settings_doc()
     fee_per_day = float(settings.get("late_fee_per_day", 50.0))
     grace = int(settings.get("grace_days", 0))
+    block_after = int(settings.get("block_after_days", 7))
     now = datetime.now(timezone.utc)
     cursor = db.payments.find({"status": "pending"}, {"_id": 0})
     async for p in cursor:
@@ -651,6 +969,22 @@ async def _compute_late_fees_once():
         new_fee = round(billable_days * fee_per_day, 2)
         if abs(float(p.get("late_fee", 0.0)) - new_fee) > 0.001:
             await db.payments.update_one({"id": p["id"]}, {"$set": {"late_fee": new_fee}})
+        # Auto-block vehicle
+        vid = p.get("vehicle_id")
+        if vid and days_overdue > block_after:
+            await db.vehicles.update_one(
+                {"id": vid, "status": "rented"},
+                {"$set": {"status": "blocked"}},
+            )
+            # Notify user (once via reminder mechanism — separate one-shot block notice)
+            already = await db.notifications.find_one({"user_id": p["user_id"], "title": "Vehicle Suspended", "body": {"$regex": p["id"][:8]}}, {"_id": 0})
+            if not already:
+                await db.notifications.insert_one({
+                    "id": str(uuid.uuid4()), "user_id": p["user_id"],
+                    "title": "Vehicle Suspended",
+                    "body": f"Your vehicle has been suspended due to overdue payment (#{p['id'][:8]}). Please clear dues to resume.",
+                    "read": False, "created_at": now_utc_iso(),
+                })
 
 
 # -------------------- WEEKLY REMINDER SCHEDULER --------------------
