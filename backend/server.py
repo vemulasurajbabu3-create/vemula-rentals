@@ -585,10 +585,16 @@ async def mark_payment_paid(pid: str, body: PaymentMarkPaid, user: dict = Depend
             "payment_method": (body.payment_method or "upi"),
         }},
     )
-    # Create next pending payment
+    # Create next pending payment anchored to PREVIOUS due_date + 7 days
     veh = await db.vehicles.find_one({"assigned_to": user["id"]}, {"_id": 0})
     if veh:
-        due = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        try:
+            prev_due_dt = datetime.fromisoformat(p["due_date"])
+            if prev_due_dt.tzinfo is None:
+                prev_due_dt = prev_due_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            prev_due_dt = datetime.now(timezone.utc)
+        due = (prev_due_dt + timedelta(days=7)).isoformat()
         await db.payments.insert_one({
             "id": str(uuid.uuid4()), "user_id": user["id"], "vehicle_id": veh["id"],
             "amount": veh["weekly_rent"], "late_fee": 0.0, "due_date": due, "status": "pending",

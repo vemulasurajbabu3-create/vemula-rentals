@@ -101,7 +101,7 @@ export default function AdminPayments() {
           const fee = Number(item.late_fee || 0);
           const total = Number(item.amount) + fee;
           return (
-            <Pressable onPress={() => setEditing(item)} style={[styles.row, shadow.card]} testID={`payment-${item.id}`}>
+            <Pressable onPress={() => setEditing(item)} style={[styles.row, shadow.card]} testID={`payment-row-${item.id}`}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.amt}>₹{total.toFixed(0)}</Text>
                 {fee > 0 && <Text style={styles.feeBreak}>₹{Number(item.amount).toFixed(0)} + <Text style={{ color: colors.error, fontWeight: "700" }}>₹{fee.toFixed(0)} late</Text></Text>}
