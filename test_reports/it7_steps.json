@@ -1,0 +1,105 @@
+{
+  "phone": "7284958541",
+  "results": [
+    {
+      "name": "admin_approves_customer",
+      "ok": true,
+      "detail": "7284958541"
+    },
+    {
+      "name": "api_seed_deposit_1000",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "ui_login",
+      "ok": true,
+      "detail": "http://localhost:3000/customer/home"
+    },
+    {
+      "name": "tabs_visible",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "default_no_wallet_card",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wallet_balance_>=1000_after_seed",
+      "ok": true,
+      "detail": "'\u20b91000  / \u20b92000 recommended'"
+    },
+    {
+      "name": "wallet_list_has_row",
+      "ok": true,
+      "detail": "rows=1"
+    },
+    {
+      "name": "wallet_row_paid_plus1000",
+      "ok": true,
+      "detail": "'\uf12e+\u20b91000Deposit added \u00b7 24 JunTxn: SEED4F8622Paid'"
+    },
+    {
+      "name": "topup_modal_confirm_in_viewport",
+      "ok": false,
+      "detail": "box={'top': 1556, 'bottom': 1608, 'vh': 844} (FAIL means button below fold \u2014 UX bug)"
+    },
+    {
+      "name": "weekly_hides_deposit_card",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "admin_create_vehicle",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "admin_assign_vehicle",
+      "ok": true,
+      "detail": "200 {\"ok\":true}"
+    },
+    {
+      "name": "backend_has_pending",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "ui_pending_row_visible",
+      "ok": true,
+      "detail": "[data-testid=\"payment-15ce7bc6-2c45-49c4-b7fc-5221cc965760\"]"
+    },
+    {
+      "name": "ui_row_paid_upi",
+      "ok": true,
+      "detail": "'\u20b9400Paid 24 Jun  \u00b7  UPITxn: UPITEST075BA2Paid'"
+    },
+    {
+      "name": "new_pending_after_upi",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "admin_mark_cash_paid",
+      "ok": false,
+      "detail": "422 {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\"],\"msg\":\"Field required\",\"input\":null,"
+    },
+    {
+      "name": "ui_row_paid_cash",
+      "ok": false,
+      "detail": "'\u20b9400Due 08 JulPending'"
+    },
+    {
+      "name": "tab_history_works",
+      "ok": true,
+      "detail": "http://localhost:3000/customer/history"
+    },
+    {
+      "name": "pickup_address_card_on_home",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

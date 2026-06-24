@@ -11,6 +11,19 @@ import { colors, spacing, radius, type, shadow } from "@/src/theme";
 const MERCHANT_VPA_DEFAULT = "vemula.balajee@ybl";
 const MERCHANT_NAME_DEFAULT = "Vemula Rentals";
 
+function depositStatusMeta(status: string) {
+  switch (status) {
+    case "paid":
+      return { label: "Deposit added", chip: "Paid", icon: "arrow-down-circle", color: colors.brandPrimary, bg: colors.brandTertiary, sign: "+" };
+    case "refunded":
+      return { label: "Refunded to you", chip: "Refunded", icon: "arrow-up-circle", color: colors.onBrandSecondary, bg: colors.brandSecondary, sign: "-" };
+    case "forfeited":
+      return { label: "Deduction", chip: "Deducted", icon: "remove-circle", color: colors.error, bg: colors.error + "22", sign: "-" };
+    default:
+      return { label: status, chip: status, icon: "ellipse", color: colors.onSurfaceSecondary, bg: colors.surfaceSecondary, sign: "" };
+  }
+}
+
 type Payment = any;
 
 export default function PaymentsScreen() {
@@ -27,6 +40,7 @@ export default function PaymentsScreen() {
   const [confirming, setConfirming] = useState(false);
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
+  const [activeTab, setActiveTab] = useState<"weekly" | "wallet">("weekly");
 
   const load = useCallback(async () => {
     try {
@@ -112,6 +126,7 @@ export default function PaymentsScreen() {
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
 
   const presetAmounts = [500, 1000, 2000, 5000];
+  const depositHistory = (deposit.history || []).filter((d: any) => d.status !== "pending");
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]} testID="payments-screen">
@@ -119,109 +134,185 @@ export default function PaymentsScreen() {
         <Text style={styles.h1}>Payments</Text>
       </View>
 
-      {pending.length > 0 && (
-        <View style={[styles.pendingBanner, shadow.card]} testID="pending-banner">
-          <View>
-            <Text style={styles.pendingLabel}>Pending Balance</Text>
-            <Text style={styles.pendingAmount}>₹{pendingTotal.toFixed(0)}</Text>
-          </View>
-          <Pressable testID="pay-now-banner" onPress={() => openUpi(pending[0])} style={({ pressed }) => [styles.payNow, pressed && { opacity: 0.85 }]}>
-            <Ionicons name="flash" size={16} color={colors.onBrandPrimary} />
-            <Text style={styles.payNowText}>Pay Now</Text>
-          </Pressable>
-        </View>
-      )}
-
-      <View style={[styles.walletCard, shadow.card]} testID="deposit-card">
-        <View style={styles.walletHeaderRow}>
-          <View style={styles.walletIconWrap}>
-            <Ionicons name="wallet" size={22} color={colors.onBrandPrimary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.walletLabel}>Security Deposit Wallet</Text>
-            <Text style={styles.walletAmount} testID="wallet-balance">
-              ₹{Number(deposit.balance).toFixed(0)}
-              <Text style={styles.walletMuted}>{`  / ₹${targetDeposit.toFixed(0)} ${requiredDeposit > 0 ? "required" : "recommended"}`}</Text>
-            </Text>
-          </View>
-          {depositShortfall > 0 ? (
-            <View style={[styles.statusChip, { backgroundColor: colors.warning + "22" }]}>
-              <Text style={[styles.statusChipText, { color: colors.warning }]}>Top up</Text>
-            </View>
-          ) : (
-            <View style={[styles.statusChip, { backgroundColor: colors.brandSecondary }]}>
-              <Text style={[styles.statusChipText, { color: colors.onBrandSecondary }]}>Funded</Text>
-            </View>
+      <View style={styles.segmented} testID="payments-tabs">
+        <Pressable
+          testID="tab-weekly"
+          onPress={() => setActiveTab("weekly")}
+          style={[styles.segTab, activeTab === "weekly" && styles.segTabActive]}
+        >
+          <Ionicons name="receipt-outline" size={16} color={activeTab === "weekly" ? colors.brandPrimary : colors.onSurfaceSecondary} />
+          <Text style={[styles.segTabText, activeTab === "weekly" && styles.segTabTextActive]}>Weekly</Text>
+          {pending.length > 0 && (
+            <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{pending.length}</Text></View>
           )}
-        </View>
-
-        <View style={styles.walletProgressTrack}>
-          <View style={[styles.walletProgressFill, { width: `${Math.min(100, (deposit.balance / Math.max(1, targetDeposit)) * 100).toFixed(0)}%` }]} />
-        </View>
-
-        <Text style={styles.walletHelper} testID="deposit-sub">{helperText}</Text>
-
-        <View style={styles.walletButtonRow}>
-          {depositShortfall > 0 && (
-            <Pressable
-              testID="pay-deposit-button"
-              onPress={() => startDeposit(depositShortfall)}
-              style={({ pressed }) => [styles.depositCta, pressed && { opacity: 0.85 }]}
-            >
-              <Ionicons name="flash" size={14} color={colors.onBrandPrimary} />
-              <Text style={styles.depositCtaText}>{`Pay ₹${depositShortfall.toFixed(0)}`}</Text>
-            </Pressable>
-          )}
-          <Pressable
-            testID="top-up-button"
-            onPress={() => { setTopUpAmount(""); setTopUpOpen(true); }}
-            style={({ pressed }) => [styles.topUpCta, pressed && { opacity: 0.85 }]}
-          >
-            <Ionicons name="add-circle" size={14} color={colors.brandPrimary} />
-            <Text style={styles.topUpCtaText}>Top Up Wallet</Text>
-          </Pressable>
-        </View>
+        </Pressable>
+        <Pressable
+          testID="tab-wallet"
+          onPress={() => setActiveTab("wallet")}
+          style={[styles.segTab, activeTab === "wallet" && styles.segTabActive]}
+        >
+          <Ionicons name="wallet-outline" size={16} color={activeTab === "wallet" ? colors.brandPrimary : colors.onSurfaceSecondary} />
+          <Text style={[styles.segTabText, activeTab === "wallet" && styles.segTabTextActive]}>Wallet</Text>
+          <Text style={[styles.tabValue, activeTab === "wallet" && { color: colors.brandPrimary }]}>₹{Number(deposit.balance).toFixed(0)}</Text>
+        </Pressable>
       </View>
 
-      <FlatList
-        data={payments}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.sm }}
-        ListEmptyComponent={
-          <View style={styles.emptyCard}>
-            <Ionicons name="receipt-outline" size={42} color={colors.onSurfaceSecondary} />
-            <Text style={styles.emptyTitle}>No payments yet</Text>
-            <Text style={styles.emptyBody}>Once you start rental, your weekly payments will appear here.</Text>
-          </View>
-        }
-        renderItem={({ item }) => {
-          const fee = Number(item.late_fee || 0);
-          const total = Number(item.amount) + fee;
-          return (
-            <View style={[styles.row, shadow.card]} testID={`payment-${item.id}`}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.amount}>₹{total.toFixed(0)}</Text>
-                {fee > 0 && (
-                  <Text style={styles.feeBreak} testID={`fee-break-${item.id}`}>
-                    ₹{Number(item.amount).toFixed(0)} rent + <Text style={{ color: colors.error, fontWeight: "700" }}>₹{fee.toFixed(0)} late fee</Text>
-                  </Text>
-                )}
-                <Text style={styles.metaText}>
-                  {item.status === "paid"
-                    ? `Paid ${new Date(item.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`
-                    : `Due ${new Date(item.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}
-                </Text>
-                {item.transaction_id && <Text style={styles.txn}>Txn: {item.transaction_id}</Text>}
+      {activeTab === "weekly" ? (
+        <>
+          {pending.length > 0 && (
+            <View style={[styles.pendingBanner, shadow.card]} testID="pending-banner">
+              <View>
+                <Text style={styles.pendingLabel}>Pending Balance</Text>
+                <Text style={styles.pendingAmount}>₹{pendingTotal.toFixed(0)}</Text>
               </View>
-              <View style={[styles.statusChip, { backgroundColor: item.status === "paid" ? colors.brandSecondary : (fee > 0 ? colors.error + "22" : colors.warning + "22") }]}>
-                <Text style={[styles.statusChipText, { color: item.status === "paid" ? colors.onBrandSecondary : (fee > 0 ? colors.error : colors.warning) }]}>
-                  {item.status === "paid" ? "Paid" : (fee > 0 ? "Overdue" : "Pending")}
-                </Text>
-              </View>
+              <Pressable testID="pay-now-banner" onPress={() => openUpi(pending[0])} style={({ pressed }) => [styles.payNow, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="flash" size={16} color={colors.onBrandPrimary} />
+                <Text style={styles.payNowText}>Pay Now</Text>
+              </Pressable>
             </View>
-          );
-        }}
-      />
+          )}
+
+          <FlatList
+            data={payments}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.sm }}
+            ListEmptyComponent={
+              <View style={styles.emptyCard}>
+                <Ionicons name="receipt-outline" size={42} color={colors.onSurfaceSecondary} />
+                <Text style={styles.emptyTitle}>No payments yet</Text>
+                <Text style={styles.emptyBody}>Once you start rental, your weekly payments will appear here.</Text>
+              </View>
+            }
+            renderItem={({ item }) => {
+              const fee = Number(item.late_fee || 0);
+              const total = Number(item.amount) + fee;
+              const isCash = item.payment_method === "cash" || (item.transaction_id || "").startsWith("CASH-");
+              return (
+                <Pressable
+                  testID={`payment-${item.id}`}
+                  onPress={() => item.status === "pending" && openUpi(item)}
+                  style={({ pressed }) => [styles.row, shadow.card, pressed && item.status === "pending" && { opacity: 0.85 }]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.amount}>₹{total.toFixed(0)}</Text>
+                    {fee > 0 && (
+                      <Text style={styles.feeBreak} testID={`fee-break-${item.id}`}>
+                        ₹{Number(item.amount).toFixed(0)} rent + <Text style={{ color: colors.error, fontWeight: "700" }}>₹{fee.toFixed(0)} late fee</Text>
+                      </Text>
+                    )}
+                    <Text style={styles.metaText}>
+                      {item.status === "paid"
+                        ? `Paid ${new Date(item.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`
+                        : `Due ${new Date(item.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}
+                      {item.status === "paid" && isCash ? "  ·  Cash" : item.status === "paid" ? "  ·  UPI" : ""}
+                    </Text>
+                    {item.transaction_id && <Text style={styles.txn}>Txn: {item.transaction_id}</Text>}
+                  </View>
+                  <View style={[styles.statusChip, { backgroundColor: item.status === "paid" ? colors.brandSecondary : (fee > 0 ? colors.error + "22" : colors.warning + "22") }]}>
+                    <Text style={[styles.statusChipText, { color: item.status === "paid" ? colors.onBrandSecondary : (fee > 0 ? colors.error : colors.warning) }]}>
+                      {item.status === "paid" ? "Paid" : (fee > 0 ? "Overdue" : "Pending")}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            }}
+          />
+        </>
+      ) : (
+        <FlatList
+          testID="wallet-list"
+          data={depositHistory}
+          keyExtractor={(d: any) => d.id}
+          contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.sm }}
+          ListHeaderComponent={
+            <View style={[styles.walletCard, shadow.card]} testID="deposit-card">
+              <View style={styles.walletHeaderRow}>
+                <View style={styles.walletIconWrap}>
+                  <Ionicons name="wallet" size={22} color={colors.onBrandPrimary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.walletLabel}>Security Deposit Wallet</Text>
+                  <Text style={styles.walletAmount} testID="wallet-balance">
+                    ₹{Number(deposit.balance).toFixed(0)}
+                    <Text style={styles.walletMuted}>{`  / ₹${targetDeposit.toFixed(0)} ${requiredDeposit > 0 ? "required" : "recommended"}`}</Text>
+                  </Text>
+                </View>
+                {depositShortfall > 0 ? (
+                  <View style={[styles.statusChip, { backgroundColor: colors.warning + "22" }]}>
+                    <Text style={[styles.statusChipText, { color: colors.warning }]}>Top up</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.statusChip, { backgroundColor: colors.brandSecondary }]}>
+                    <Text style={[styles.statusChipText, { color: colors.onBrandSecondary }]}>Funded</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.walletProgressTrack}>
+                <View style={[styles.walletProgressFill, { width: `${Math.min(100, (deposit.balance / Math.max(1, targetDeposit)) * 100).toFixed(0)}%` }]} />
+              </View>
+
+              <Text style={styles.walletHelper} testID="deposit-sub">{helperText}</Text>
+
+              <View style={styles.walletButtonRow}>
+                {depositShortfall > 0 && (
+                  <Pressable
+                    testID="pay-deposit-button"
+                    onPress={() => startDeposit(depositShortfall)}
+                    style={({ pressed }) => [styles.depositCta, pressed && { opacity: 0.85 }]}
+                  >
+                    <Ionicons name="flash" size={14} color={colors.onBrandPrimary} />
+                    <Text style={styles.depositCtaText}>{`Pay ₹${depositShortfall.toFixed(0)}`}</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  testID="top-up-button"
+                  onPress={() => { setTopUpAmount(""); setTopUpOpen(true); }}
+                  style={({ pressed }) => [styles.topUpCta, pressed && { opacity: 0.85 }]}
+                >
+                  <Ionicons name="add-circle" size={14} color={colors.brandPrimary} />
+                  <Text style={styles.topUpCtaText}>Top Up Wallet</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.walletSectionTitle}>Recent Activity</Text>
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyCard}>
+              <Ionicons name="wallet-outline" size={42} color={colors.onSurfaceSecondary} />
+              <Text style={styles.emptyTitle}>No wallet activity yet</Text>
+              <Text style={styles.emptyBody}>Top up your wallet to get a vehicle assigned. Refunds and deductions will appear here.</Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            const meta = depositStatusMeta(item.status);
+            const amt = Number(item.amount || 0);
+            return (
+              <View style={[styles.row, shadow.card]} testID={`wallet-row-${item.id}`}>
+                <View style={[styles.depIconWrap, { backgroundColor: meta.bg }]}>
+                  <Ionicons name={meta.icon as any} size={18} color={meta.color} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.amount}>{meta.sign}₹{amt.toFixed(0)}</Text>
+                  <Text style={styles.metaText}>
+                    {meta.label}
+                    {item.paid_at ? ` · ${new Date(item.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` :
+                      item.refunded_at ? ` · ${new Date(item.refunded_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` :
+                      item.forfeit_at ? ` · ${new Date(item.forfeit_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` :
+                      ` · ${new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}
+                  </Text>
+                  {item.transaction_id ? <Text style={styles.txn}>Txn: {item.transaction_id}</Text> : null}
+                  {item.forfeit_reason ? <Text style={styles.txn} numberOfLines={2}>Reason: {item.forfeit_reason}</Text> : null}
+                </View>
+                <View style={[styles.statusChip, { backgroundColor: meta.bg }]}>
+                  <Text style={[styles.statusChipText, { color: meta.color }]}>{meta.chip}</Text>
+                </View>
+              </View>
+            );
+          }}
+        />
+      )}
 
       <Modal visible={topUpOpen} transparent animationType="slide" onRequestClose={() => setTopUpOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
@@ -390,4 +481,14 @@ const styles = StyleSheet.create({
   presetChipActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
   presetText: { color: colors.onSurface, fontWeight: "700", fontSize: type.sm },
   presetTextActive: { color: colors.brandPrimary },
+  segmented: { flexDirection: "row", marginHorizontal: spacing.lg, marginBottom: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill, padding: 4 },
+  segTab: { flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, paddingVertical: spacing.sm, borderRadius: radius.pill },
+  segTabActive: { backgroundColor: colors.surface },
+  segTabText: { color: colors.onSurfaceSecondary, fontWeight: "700", fontSize: type.sm },
+  segTabTextActive: { color: colors.brandPrimary },
+  tabBadge: { backgroundColor: colors.error, paddingHorizontal: 6, minWidth: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center", marginLeft: 4 },
+  tabBadgeText: { color: colors.onBrandPrimary, fontSize: 10, fontWeight: "800" },
+  tabValue: { color: colors.onSurfaceSecondary, fontSize: type.sm, fontWeight: "700", marginLeft: 4 },
+  walletSectionTitle: { color: colors.onSurfaceSecondary, fontSize: type.sm, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5, marginTop: spacing.lg },
+  depIconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
 });

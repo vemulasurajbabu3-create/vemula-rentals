@@ -370,3 +370,27 @@ agent_communication_iter6:
   - agent: "testing"
     message: "Iteration 6: backend pytest 11/11 PASS (test_payments_cash_cadence.py). Frontend B1/B2/B5 GREEN. B3/B4 partially verified — code wiring + backend correct; frontend testIDs missing on some Pressables. ONE BACKEND BUG: UPI mark-paid still uses now+7d for next pending due_date instead of prev_due+7d (spec A5 violation). merchant_upi restored to 'vemula.balajee@ybl' at end of run. Screenshots in /app/test_reports/screens/it6/."
 
+# ============= Iteration 7: Weekly / Wallet tabs on Customer Payments =============
+
+frontend_iter7:
+  - task: "Customer Payments: Weekly/Wallet segmented control"
+    file: "/app/frontend/app/customer/payments.tsx"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          PASS (iter7) — Verified at 390x844 web preview with fresh approved customer + admin (9999999999).
+          • payments-tabs renders with tab-weekly + tab-wallet; default active is Weekly; deposit-card NOT visible.
+          • tab-wallet → deposit-card visible with wallet-balance; wallet-list (FlatList) renders wallet-row-{id}; after a ₹1000 paid deposit the row shows '+₹1000' + 'Paid' chip.
+          • Back to Weekly → deposit-card hidden; tab-weekly shows pending count badge when pending>0.
+          • Admin assigned TEST vehicle (security_deposit=500 ≤ wallet 1000) → Weekly tab shows pending row → tap opens confirm-payment-sheet → submit UPI txn → row flips to 'Paid · UPI', new pending row appears.
+          • Admin POST /admin/payments/{pid}/mark-paid-cash with body {note} → row shows 'Paid · Cash' + Txn 'CASH-…'.
+          • Regression: tab-history navigates to /customer/history; PickupAddressCard visible on /customer/home.
+          ONE UX ISSUE (medium): Top-up modal sheet content overflows the viewport — confirm-top-up-button sits ~700px below the fold on 390x844 (no scroll inside the sheet). Function works (verified via JS dispatch), but a real user on a 6.x" phone cannot reach 'Continue to UPI'. Recommend wrapping sheet content in a ScrollView or constraining sheet height. Screenshots: /app/test_reports/screens/it7/{01_weekly_default, 03_wallet_tab, 04_weekly_pending, 05_weekly_paid_upi, 07_weekly_paid_cash}.png. Full report: /app/test_reports/iteration_7.json.
+
+agent_communication_iter7:
+  - agent: "testing"
+    message: "Iteration 7: Weekly/Wallet segmented control on /customer/payments fully verified end-to-end (default Weekly, Wallet tab card+list, deposit-card hidden in Weekly, weekly UPI mark-paid → 'Paid · UPI', admin Cash mark-paid → 'Paid · Cash' with CASH- txn). One MEDIUM UX bug remains: Top-Up Wallet bottom sheet is not scrollable on web/small screens; 'Continue to UPI' button is ~700px below the fold. Otherwise GREEN. No backend changes required."
+

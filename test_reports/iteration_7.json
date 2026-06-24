@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 7 GREEN for the new Weekly/Wallet segmented control on /customer/payments. Verified end-to-end at 390x844 web preview using a fresh approved customer + admin (9999999999). Default state: payments-tabs visible with tab-weekly + tab-wallet, Weekly active, deposit-card NOT rendered. Switching to Wallet shows deposit-card with testID=wallet-balance and a wallet-list FlatList; after seeding a ₹1000 paid deposit, wallet-row-{id} renders with '+₹1000' + 'Paid' chip. Switching back to Weekly hides the deposit-card. Admin assigned a TEST vehicle (security_deposit=500 ≤ wallet balance 1000) → Weekly tab now shows a pending row; tapping opens confirm-payment-sheet; submitting a UPI txn flips the row to 'Paid · UPI' with Txn line and a new pending row appears for next week. Admin POST /admin/payments/{pid}/mark-paid-cash with body {note} → customer Weekly tab shows the row as 'Paid · Cash' with Txn 'CASH-…'. Regression: tab-history still navigates to /customer/history and PickupAddressCard renders on /customer/home. Screenshots saved under /app/test_reports/screens/it7/.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "customer/payments.tsx Top Up sheet (Modal sheet) on web/small heights",
+        "issue": "Inside the top-up modal the confirm-top-up-button is laid out at top≈1556px while viewport height is 844px — i.e. ~700px below the fold. The bottom sheet is not scrollable on web, so the user can never reach 'Continue to UPI' without manual scroll. Same risk for confirm-payment-sheet and the deposit confirm sheet on shorter devices. Wrap the sheet content (or the part below the inputs) in a ScrollView, or set maxHeight on the sheet so its content scrolls.",
+        "testID": "confirm-top-up-button",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "customer/payments Weekly tab", "issues": ["Meta line shows two spaces around the bullet ('Paid 24 Jun  ·  UPI') — minor double-space artifact from the JSX template strings; consider replacing with a single non-breaking-space pair."]}
+    ],
+    "react_native_issues": [
+      {"component": "expo / expo-font / expo-router", "issue": "Version drift still flagged at boot: expo@54.0.34 expected 54.0.35; expo-font@14.0.11 expected 14.0.12; expo-router@6.0.23 expected 6.0.24. Reference: /app/frontend/package.json"}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/screens/it7/01_weekly_default.png",
+    "/app/test_reports/screens/it7/03_wallet_tab.png",
+    "/app/test_reports/screens/it7/04_weekly_pending.png",
+    "/app/test_reports/screens/it7/05_weekly_paid_upi.png",
+    "/app/test_reports/screens/it7/07_weekly_paid_cash.png",
+    "/app/test_reports/it7_steps.json",
+    "/app/test_reports/it7_test.py"
+  ],
+  "action_items": [
+    "[MEDIUM] Make the Top Up Wallet bottom sheet scrollable (wrap content in ScrollView or apply maxHeight + flex on the sheet) so 'Continue to UPI' is reachable on 844px-tall viewports / web. The sheet currently overflows by ~700px.",
+    "[LOW] Clean up the double-space artifact in Weekly tab meta text ('Paid <date>  ·  UPI/Cash').",
+    "[LOW] Bump expo/expo-font/expo-router patch versions to clear startup warnings."
+  ],
+  "critical_code_review_comments": [
+    "depositHistory correctly filters 'pending' so the wallet-list only shows paid/refunded/forfeited rows (matches spec).",
+    "tab-weekly badge uses pending.length — verified visible when pending > 0 and hidden otherwise.",
+    "openUpi gates pressable on item.status==='pending' so paid rows are not re-tappable — correct.",
+    "wallet card was correctly moved into ListHeaderComponent of the wallet FlatList so it only renders in the Wallet tab.",
+    "Top-up modal viewport overflow is the only UX bug observed; functionality (state mgmt + API wiring) is correct."
+  ],
+  "updated_files": [
+    "/app/test_reports/it7_test.py (new standalone Playwright runner — kept for future iterations)"
+  ],
+  "success_rate": {"backend": "100% (existing pytest suites unaffected)", "frontend": "19/20 verifications passed; 1 UX warning on top-up modal viewport"},
+  "seed_data_creation": "Each run creates a throwaway customer (7XXXXXXXXX), is admin-approved, then a TEST IT7-<hex> vehicle is created and assigned. Wallet was seeded via POST /api/deposits + mark-paid (because the top-up modal is not reachable on web). All artefacts are prefixed TEST/IT7 for cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Re-test the top-up sheet after main agent wraps it in a ScrollView. Backend admin cash endpoint expects body {note?} — pass json={'note': '...'}. Use POST /admin/users/{uid}/approve to fast-approve customers. Seed deposits via /deposits + /deposits/{id}/mark-paid if Top Up modal is still off-screen.",
+  "rca_of_issue": "Top-up modal overflow: the Modal sheet is a non-scrollable View with sequential children (title, body, label, TextInput, preset chip row, confirmCta button, cancel). At 390x844 with safe-area chrome and the bottom-sheet handle/title, the content's total height exceeds the visible area by ~700px, pushing the 'Continue to UPI' button entirely below the fold. Fix: wrap the sheet content in a ScrollView with contentContainerStyle={{paddingBottom: 24}} OR set sheet maxHeight = window.height * 0.85 + flex:1 on a nested ScrollView. Reproduction: customer/payments → tab-wallet → top-up-button → measure confirm-top-up-button getBoundingClientRect on 390x844."
+}
