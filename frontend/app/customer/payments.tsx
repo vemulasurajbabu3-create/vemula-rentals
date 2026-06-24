@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, StyleSheet, FlatList, Pressable, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -204,7 +204,7 @@ export default function PaymentsScreen() {
                       {item.status === "paid"
                         ? `Paid ${new Date(item.paid_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`
                         : `Due ${new Date(item.due_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}
-                      {item.status === "paid" && isCash ? "  ·  Cash" : item.status === "paid" ? "  ·  UPI" : ""}
+                      {item.status === "paid" && isCash ? " · Cash" : item.status === "paid" ? " · UPI" : ""}
                     </Text>
                     {item.transaction_id && <Text style={styles.txn}>Txn: {item.transaction_id}</Text>}
                   </View>
@@ -318,46 +318,48 @@ export default function PaymentsScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
           <View style={styles.sheet} testID="top-up-sheet">
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Top Up Wallet</Text>
-            <Text style={styles.sheetBody}>Add any amount to your security deposit wallet. The business holds this balance until you return the vehicle.</Text>
-            <Text style={styles.label}>Amount (₹)</Text>
-            <TextInput
-              testID="top-up-input"
-              value={topUpAmount}
-              onChangeText={(t) => setTopUpAmount(t.replace(/[^0-9]/g, ""))}
-              placeholder="e.g. 1000"
-              placeholderTextColor={colors.onSurfaceSecondary}
-              style={styles.txInput}
-              keyboardType="numeric"
-            />
-            <View style={styles.presetRow}>
-              {presetAmounts.map((amt) => (
-                <Pressable
-                  key={amt}
-                  testID={`preset-${amt}`}
-                  onPress={() => setTopUpAmount(String(amt))}
-                  style={({ pressed }) => [styles.presetChip, pressed && { opacity: 0.85 }, topUpAmount === String(amt) && styles.presetChipActive]}
-                >
-                  <Text style={[styles.presetText, topUpAmount === String(amt) && styles.presetTextActive]}>{`₹${amt}`}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Pressable
-              testID="confirm-top-up-button"
-              onPress={() => {
-                const n = Number(topUpAmount);
-                if (!Number.isFinite(n) || n <= 0) return;
-                setTopUpOpen(false);
-                startDeposit(n);
-              }}
-              disabled={!Number(topUpAmount) || Number(topUpAmount) <= 0}
-              style={({ pressed }) => [styles.confirmCta, (!Number(topUpAmount) || Number(topUpAmount) <= 0) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
-            >
-              <Text style={styles.confirmText}>Continue to UPI</Text>
-            </Pressable>
-            <Pressable onPress={() => setTopUpOpen(false)} style={styles.cancelBtn}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
+            <ScrollView contentContainerStyle={{ paddingBottom: spacing.lg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.sheetTitle}>Top Up Wallet</Text>
+              <Text style={styles.sheetBody}>Add any amount to your security deposit wallet. The business holds this balance until you return the vehicle.</Text>
+              <Text style={styles.label}>Amount (₹)</Text>
+              <TextInput
+                testID="top-up-input"
+                value={topUpAmount}
+                onChangeText={(t) => setTopUpAmount(t.replace(/[^0-9]/g, ""))}
+                placeholder="e.g. 1000"
+                placeholderTextColor={colors.onSurfaceSecondary}
+                style={styles.txInput}
+                keyboardType="numeric"
+              />
+              <View style={styles.presetRow}>
+                {presetAmounts.map((amt) => (
+                  <Pressable
+                    key={amt}
+                    testID={`preset-${amt}`}
+                    onPress={() => setTopUpAmount(String(amt))}
+                    style={({ pressed }) => [styles.presetChip, pressed && { opacity: 0.85 }, topUpAmount === String(amt) && styles.presetChipActive]}
+                  >
+                    <Text style={[styles.presetText, topUpAmount === String(amt) && styles.presetTextActive]}>{`₹${amt}`}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable
+                testID="confirm-top-up-button"
+                onPress={() => {
+                  const n = Number(topUpAmount);
+                  if (!Number.isFinite(n) || n <= 0) return;
+                  setTopUpOpen(false);
+                  startDeposit(n);
+                }}
+                disabled={!Number(topUpAmount) || Number(topUpAmount) <= 0}
+                style={({ pressed }) => [styles.confirmCta, (!Number(topUpAmount) || Number(topUpAmount) <= 0) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={styles.confirmText}>Continue to UPI</Text>
+              </Pressable>
+              <Pressable onPress={() => setTopUpOpen(false)} style={styles.cancelBtn}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -447,7 +449,7 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: type.xl, fontWeight: "700", color: colors.onSurface },
   emptyBody: { color: colors.onSurfaceSecondary, textAlign: "center" },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.4)" },
-  sheet: { backgroundColor: colors.surface, padding: spacing.xl, borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: spacing.sm },
+  sheet: { backgroundColor: colors.surface, padding: spacing.xl, borderTopLeftRadius: 24, borderTopRightRadius: 24, gap: spacing.sm, maxHeight: "85%" },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: spacing.md },
   sheetTitle: { fontSize: type.xl, fontWeight: "700", color: colors.onSurface },
   sheetBody: { color: colors.onSurfaceSecondary, fontSize: type.base, marginBottom: spacing.md },
