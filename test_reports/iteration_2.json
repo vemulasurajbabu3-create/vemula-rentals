@@ -1,0 +1,71 @@
+{
+  "summary": "Verified the 3 new features (admin walk-around video + security deposit, customer share-location button, customer pre-assignment deposit card) and corresponding backend endpoints. Backend deposit endpoints (GET /deposits/me, POST /deposits, POST /deposits/{id}/mark-paid) all PASS (3/3 pytest). Customer Home location-banner renders and share-location-button correctly hidden on web. Admin Vehicle modal has both field-deposit and Walk-around Video record/gallery buttons. TWO CRITICAL BUGS BLOCKING FEATURE: (1) POST /api/vehicles drops security_deposit and walk_around_video fields server-side (Vehicle(...) constructor in server.py:397-402 silently ignores body.security_deposit + body.walk_around_video, so admin entered ₹2500 persists as default ₹2000). (2) customer/payments.tsx never renders the deposit card -- `showDepositCard`, `depositShortfall`, `startDeposit` and styles.depositCard* are all defined but no JSX block references them, so the deposit card is invisible regardless of state. End-to-end the customer can NEVER pay a security deposit from the Payments tab on either web or native.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/vehicles",
+        "issue": "Handler drops `security_deposit` and `walk_around_video` from the VehicleCreate body. server.py:395-404 builds Vehicle(...) without passing those two fields, so DB stores Vehicle defaults (security_deposit=2000.0, walk_around_video=None) regardless of what admin sends. Repro: POST {security_deposit:2500, walk_around_video:'data:video/mp4;base64,AAAA'} returns 200 with security_deposit=2000.0 and walk_around_video=null. Test: backend/tests/test_deposits_and_vehicles.py::TestVehicleCreate::test_create_vehicle_with_deposit_and_video FAILED.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "customer/payments.tsx — Deposit card missing from JSX",
+        "issue": "`showDepositCard`, `depositShortfall`, `startDeposit`, and styles.depositCard/depositLabel/depositAmount/depositMuted/depositSub/depositCta/depositCtaText are all defined (lines 64-89, 245-251) but the JSX render tree (lines 92-148) NEVER renders a <View style={styles.depositCard}>. As a result, customer cannot pay or view security deposit from the Payments tab. Verified live: approved customer with security_deposit=2000 vehicle assigned + ₹2000 already paid still sees only weekly rent ₹700; no deposit card, no `Pay Deposit` CTA, no testID for deposit-card. Add a JSX block like `{showDepositCard && (<View testID=\"deposit-card\" style={styles.depositCard}>... <Pressable testID=\"pay-deposit-button\" onPress={() => startDeposit(depositShortfall || requiredDeposit)}>Pay Deposit</Pressable></View>)}` between the pending-banner (line 108) and the FlatList (line 110).",
+        "testID": "deposit-card (MISSING — never rendered)",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Admin creates vehicle with security_deposit=2500 → assigns to customer → customer tries to pay deposit",
+        "issue": "Two cascading bugs prevent this flow: (a) backend silently drops security_deposit so vehicle is stored as 2000; (b) customer Payments screen never renders the deposit card. Even using the backend's actual stored deposit (2000), the customer UI offers no way to pay it.",
+        "affected_testIDs": ["field-deposit", "deposit-card", "pay-deposit-button", "deposit-txn-input", "confirm-deposit-button"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "admin/vehicles list",
+        "issues": [
+          "List rows show only `₹<rent>/wk` + status; security_deposit is invisible in the list, so admin has no visual confirmation that the deposit field was persisted. Combined with the backend bug this also masks the silent data loss."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deposits_and_vehicles.py",
+    "/app/test_reports/pytest/deposits_results.xml",
+    "/app/test_reports/screens/04_vehicle_modal.png",
+    "/app/test_reports/screens/06_vehicle_after_save.png",
+    "/app/test_reports/screens/07_customer_home.png",
+    "/app/test_reports/screens/09_customer_payments_assigned.png"
+  ],
+  "action_items": [
+    "[CRITICAL backend] In server.py:create_vehicle (line ~395), pass `security_deposit=body.security_deposit, walk_around_video=body.walk_around_video` into the Vehicle(...) constructor so admin-entered values persist.",
+    "[CRITICAL frontend] In customer/payments.tsx, render a deposit card block when `showDepositCard` is true. Wire it to `startDeposit(depositShortfall || requiredDeposit || deposit.balance)` and add testIDs `deposit-card` and `pay-deposit-button`. The `activeDeposit` modal + testID=`deposit-txn-input` / `confirm-deposit-button` already exist and work — only the entry-point card is missing.",
+    "[MEDIUM frontend] On admin/vehicles list rows, display security_deposit alongside weekly rent (e.g. `₹700/wk · Deposit ₹2500`) so admins can verify persistence at a glance.",
+    "[INFO] /api/healthz returns 404 — consider adding it for liveness; not blocking."
+  ],
+  "critical_code_review_comments": [
+    "server.py:395 create_vehicle silently drops two model fields — this is a model/route drift smell. The Vehicle constructor should be built with **body.dict() and only id/status/assigned_to/created_at injected; that way new fields added to VehicleCreate are auto-propagated.",
+    "PUT /vehicles/{vid} is correct (uses body.dict() with None filtered), so EDIT works fine — only CREATE is broken. This asymmetry makes the bug easy to miss during smoke testing.",
+    "customer/payments.tsx has ~7 unused style entries + 3 unused functions/vars (showDepositCard, depositShortfall, startDeposit). TypeScript/ESLint should ideally flag these as dead code; consider enabling `no-unused-vars` to catch similar misses in the future.",
+    "Multiple deprecated RN-Web warnings in console (`props.pointerEvents is deprecated`, `\"shadow*\" style props are deprecated. Use \"boxShadow\"`). Source is third-party libraries; not blocking but worth tracking for future RN upgrade."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_deposits_and_vehicles.py (new — 5 targeted tests)"
+  ],
+  "success_rate": {
+    "backend": "60% (3/5 — deposits CRUD passes; vehicle create with new fields + assignment gate fail because of the create bug)",
+    "frontend": "66% (admin walk-around+deposit fields rendered correctly; customer home location-banner correct; customer payments deposit card completely missing)"
+  },
+  "seed_data_creation": "Created admin-side vehicles 'TEST DepoBike' (security_deposit fell back to 2000 due to bug) and 'TEST UI Bike' via admin UI. Created test customers with phones 8888821047 and 8888822112 (approved). Customer 8888822112 has a paid ₹2500 deposit. Safe to leave; all are TEST-prefixed.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After main agent fixes (1) server.py:create_vehicle to forward security_deposit+walk_around_video, and (2) renders a deposit card in customer/payments.tsx with testID=deposit-card and a pay-deposit-button: re-run /app/backend/tests/test_deposits_and_vehicles.py (must hit 5/5), then UI-verify customer flow: login as 8888822112 (already approved, deposit paid) → Payments → confirm deposit card shows balance ₹2500 (or required deposit). For a from-scratch flow, create a new vehicle with deposit=2500, assign it to a fresh customer (expect 412), then customer pays deposit via the new card, then assign succeeds. Existing TestVehicleCreate.test_create_vehicle_with_deposit_and_video and TestAssignmentDepositGate.test_assign_after_deposit_succeeds will pass once backend is fixed.",
+  "rca_of_issue": "Bug 1 (backend): server.py create_vehicle builds Vehicle(...) with an explicit positional/keyword list that omits security_deposit and walk_around_video. Pydantic happily fills in defaults (2000.0 / None) so no validation error is raised — data loss is silent. Fix: change to `v = Vehicle(id=str(uuid.uuid4()), status='available', created_at=now_utc_iso(), **body.dict())`. Bug 2 (frontend): customer/payments.tsx was refactored to add deposit-related state/handlers + styles, but the corresponding JSX `<View testID=\"deposit-card\">...` block was never added between the pending-banner and the FlatList. Confirmed by grepping the file: `showDepositCard` is referenced only on the definition line; no consumer JSX uses it. Mitigation: insert the missing JSX (see action_items)."
+}

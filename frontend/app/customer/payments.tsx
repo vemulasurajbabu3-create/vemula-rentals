@@ -8,20 +8,31 @@ import * as Haptics from "expo-haptics";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
-const MERCHANT_VPA = "ridelease@upi";
-const MERCHANT_NAME = "RideLease";
+const MERCHANT_VPA = "vemularentals@upi";
+const MERCHANT_NAME = "Vemula Rentals";
 
 type Payment = any;
 
 export default function PaymentsScreen() {
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [deposit, setDeposit] = useState<{ balance: number; history: any[] }>({ balance: 0, history: [] });
+  const [requiredDeposit, setRequiredDeposit] = useState(0);
   const [loading, setLoading] = useState(true);
   const [activePay, setActivePay] = useState<Payment | null>(null);
+  const [activeDeposit, setActiveDeposit] = useState<any | null>(null);
   const [txn, setTxn] = useState("");
   const [confirming, setConfirming] = useState(false);
 
   const load = useCallback(async () => {
-    try { setPayments(await api<Payment[]>("/payments/me")); } catch {} finally { setLoading(false); }
+    try {
+      const [p, d, v] = await Promise.all([
+        api<Payment[]>("/payments/me"),
+        api<{ balance: number; history: any[] }>("/deposits/me"),
+        api<any | null>("/users/me/vehicle"),
+      ]);
+      setPayments(p); setDeposit(d);
+      setRequiredDeposit(v?.security_deposit ? Number(v.security_deposit) : 0);
+    } catch {} finally { setLoading(false); }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -33,19 +44,14 @@ export default function PaymentsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     const total = Number(p.amount) + Number(p.late_fee || 0);
     const url = `upi://pay?pa=${encodeURIComponent(MERCHANT_VPA)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${total}&tn=${encodeURIComponent("Weekly Rent " + p.id.slice(0, 6))}&cu=INR`;
-    setActivePay(p);
-    setTxn("");
+    setActivePay(p); setTxn("");
     if (Platform.OS !== "web") {
-      try {
-        const ok = await Linking.canOpenURL(url);
-        if (ok) await Linking.openURL(url);
-      } catch {}
+      try { const ok = await Linking.canOpenURL(url); if (ok) await Linking.openURL(url); } catch {}
     }
   };
 
   const confirmPaid = async () => {
-    if (!activePay) return;
-    if (!txn.trim()) return;
+    if (!activePay || !txn.trim()) return;
     setConfirming(true);
     try {
       await api(`/payments/${activePay.id}/mark-paid`, { method: "POST", body: { transaction_id: txn.trim() } });
@@ -55,7 +61,32 @@ export default function PaymentsScreen() {
     } catch {} finally { setConfirming(false); }
   };
 
+  const startDeposit = async (amount: number) => {
+    if (amount <= 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    const d = await api<any>("/deposits", { method: "POST", body: { amount } });
+    const url = `upi://pay?pa=${encodeURIComponent(MERCHANT_VPA)}&pn=${encodeURIComponent(MERCHANT_NAME)}&am=${amount}&tn=${encodeURIComponent("Security Deposit " + d.id.slice(0, 6))}&cu=INR`;
+    setActiveDeposit(d); setTxn("");
+    if (Platform.OS !== "web") {
+      try { const ok = await Linking.canOpenURL(url); if (ok) await Linking.openURL(url); } catch {}
+    }
+  };
+
+  const confirmDeposit = async () => {
+    if (!activeDeposit || !txn.trim()) return;
+    setConfirming(true);
+    try {
+      await api(`/deposits/${activeDeposit.id}/mark-paid`, { method: "POST", body: { transaction_id: txn.trim() } });
+      setActiveDeposit(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      load();
+    } catch {} finally { setConfirming(false); }
+  };
+
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
+
+  const depositShortfall = Math.max(0, requiredDeposit - deposit.balance);
+  const showDepositCard = deposit.balance > 0 || requiredDeposit > 0;
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]} testID="payments-screen">
@@ -146,6 +177,36 @@ export default function PaymentsScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <Modal visible={!!activeDeposit} transparent animationType="slide" onRequestClose={() => setActiveDeposit(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Confirm Deposit Payment</Text>
+            <Text style={styles.sheetBody}>Once your UPI app shows the payment succeeded, paste the transaction ID below to credit ₹{Number(activeDeposit?.amount || 0).toFixed(0)} to your deposit balance.</Text>
+            <Text style={styles.label}>Transaction ID</Text>
+            <TextInput
+              testID="deposit-txn-input"
+              value={txn}
+              onChangeText={setTxn}
+              placeholder="e.g. 491829374829"
+              placeholderTextColor={colors.onSurfaceSecondary}
+              style={styles.txInput}
+              autoCapitalize="characters"
+            />
+            <Pressable
+              testID="confirm-deposit-button"
+              onPress={confirmDeposit}
+              disabled={!txn.trim() || confirming}
+              style={({ pressed }) => [styles.confirmCta, (!txn.trim() || confirming) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
+            >
+              {confirming ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.confirmText}>Credit Deposit</Text>}
+            </Pressable>
+            <Pressable onPress={() => setActiveDeposit(null)} style={styles.cancelBtn}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -181,4 +242,11 @@ const styles = StyleSheet.create({
   confirmText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.lg },
   cancelBtn: { height: 44, alignItems: "center", justifyContent: "center", marginTop: spacing.xs },
   cancelText: { color: colors.onSurfaceSecondary, fontSize: type.base, fontWeight: "600" },
+  depositCard: { flexDirection: "row", marginHorizontal: spacing.lg, marginBottom: spacing.md, padding: spacing.lg, backgroundColor: colors.brandTertiary, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.brandSecondary, gap: spacing.md, alignItems: "center" },
+  depositLabel: { color: colors.brandPrimary, fontSize: type.sm, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
+  depositAmount: { color: colors.onSurface, fontSize: 26, fontWeight: "800", marginTop: 4 },
+  depositMuted: { fontSize: type.base, color: colors.onSurfaceSecondary, fontWeight: "400" },
+  depositSub: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 4, lineHeight: 18 },
+  depositCta: { flexDirection: "row", gap: 6, alignItems: "center", backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, alignSelf: "flex-start" },
+  depositCtaText: { color: colors.onBrandPrimary, fontWeight: "700", fontSize: type.sm },
 });

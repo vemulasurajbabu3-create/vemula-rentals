@@ -17,7 +17,10 @@
         "NSCameraUsageDescription": "Capture document and vehicle photos or videos",
         "NSMicrophoneUsageDescription": "Record audio for vehicle inspection videos",
         "NSContactsUsageDescription": "Pick an emergency contact for your rental account",
-        "UIBackgroundModes": ["location", "fetch"]
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
       }
     },
     "android": {
@@ -75,7 +78,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#000"
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

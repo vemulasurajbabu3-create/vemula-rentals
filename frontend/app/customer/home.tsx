@@ -7,6 +7,7 @@ import { Image } from "expo-image";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 import { getStatus, requestPermissions, sendCurrentLocation, startBackgroundTracking, stopBackgroundTracking, isBackgroundRunning } from "@/src/services/location";
+import * as Location from "expo-location";
 
 type Vehicle = any;
 type Payment = any;
@@ -84,6 +85,27 @@ export default function Home() {
     await refreshLocStatus();
   };
 
+  const shareLiveLocation = async () => {
+    if (Platform.OS === "web") { return; }
+    try {
+      const me = await api<any>("/users/me");
+      const contactPhone = me?.emergency_contact_phone;
+      if (!contactPhone) {
+        Linking.openURL("/customer/profile").catch(() => {});
+        return;
+      }
+      const fg = await Location.getForegroundPermissionsAsync();
+      if (fg.status !== "granted") {
+        await requestPermissions();
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const link = `https://maps.google.com/?q=${loc.coords.latitude},${loc.coords.longitude}`;
+      const text = `Hi${me?.emergency_contact_name ? " " + me.emergency_contact_name : ""}, I'm sharing my live location from Vemula Rentals: ${link}`;
+      const wa = `https://wa.me/91${String(contactPhone).replace(/\D/g, "").slice(-10)}?text=${encodeURIComponent(text)}`;
+      Linking.openURL(wa).catch(() => Linking.openURL(`sms:+91${contactPhone}?body=${encodeURIComponent(text)}`));
+    } catch {}
+  };
+
   const onRefresh = () => { setRefreshing(true); load(); };
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
@@ -148,6 +170,14 @@ export default function Home() {
             )
           )}
         </View>
+
+        {/* Share location with emergency contact (visible when location granted) */}
+        {locStatus.granted && (
+          <Pressable testID="share-location-button" onPress={shareLiveLocation} style={({ pressed }) => [styles.shareLocBtn, pressed && { opacity: 0.85 }]}>
+            <Ionicons name="share-social" size={16} color={colors.brandPrimary} />
+            <Text style={styles.shareLocText}>Share my live location with my emergency contact</Text>
+          </Pressable>
+        )}
 
         {/* Payment Card */}
         <View style={[styles.paymentCard, shadow.card]} testID="payment-status-card">
@@ -280,4 +310,6 @@ const styles = StyleSheet.create({
   notifDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brandPrimary },
   notifTitle: { fontWeight: "700", color: colors.onSurface, fontSize: type.base },
   notifBody: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 2 },
+  shareLocBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary, marginBottom: spacing.md },
+  shareLocText: { color: colors.brandPrimary, fontWeight: "700", fontSize: type.sm, textAlign: "center" },
 });

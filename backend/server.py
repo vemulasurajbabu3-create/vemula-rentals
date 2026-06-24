@@ -89,6 +89,7 @@ class Vehicle(BaseModel):
     rental_start_date: Optional[str] = None
     instructions: List[str] = []
     image_url: Optional[str] = None
+    walk_around_video: Optional[str] = None
     created_at: str
 
 
@@ -100,6 +101,7 @@ class VehicleCreate(BaseModel):
     security_deposit: float = 2000.0
     instructions: List[str] = []
     image_url: Optional[str] = None
+    walk_around_video: Optional[str] = None
 
 
 class VehicleUpdate(BaseModel):
@@ -111,6 +113,7 @@ class VehicleUpdate(BaseModel):
     status: Optional[str] = None
     instructions: Optional[List[str]] = None
     image_url: Optional[str] = None
+    walk_around_video: Optional[str] = None
 
 
 class AssignIn(BaseModel):

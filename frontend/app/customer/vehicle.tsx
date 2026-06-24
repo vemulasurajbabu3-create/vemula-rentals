@@ -1,16 +1,18 @@
 import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
 export default function VehicleScreen() {
   const [vehicle, setVehicle] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const player = useVideoPlayer(vehicle?.walk_around_video || "", (p) => { p.loop = false; });
 
   useFocusEffect(useCallback(() => {
     (async () => {
@@ -74,6 +76,26 @@ export default function VehicleScreen() {
               </View>
             ))
           )}
+
+          {vehicle.walk_around_video ? (
+            <>
+              <Text style={styles.sectionTitle}>Walk-around Video</Text>
+              {Platform.OS === "web" ? (
+                <Pressable testID="open-video-web" onPress={() => Linking.openURL(vehicle.walk_around_video)} style={[styles.videoFallback, shadow.card]}>
+                  <Ionicons name="play-circle" size={48} color={colors.brandPrimary} />
+                  <Text style={styles.videoFallbackText}>Tap to open the walk-around video</Text>
+                </Pressable>
+              ) : (
+                <VideoView
+                  testID="walk-around-video"
+                  style={styles.video}
+                  player={player}
+                  allowsFullscreen
+                  nativeControls
+                />
+              )}
+            </>
+          ) : null}
         </View>
       </ScrollView>
     </View>
@@ -114,4 +136,7 @@ const styles = StyleSheet.create({
   stepBadgeText: { color: colors.brandPrimary, fontWeight: "800" },
   stepText: { flex: 1, color: colors.onSurface, fontSize: type.base, lineHeight: 20 },
   muted: { color: colors.onSurfaceSecondary, fontSize: type.base },
+  video: { width: "100%", height: 220, borderRadius: radius.lg, backgroundColor: "#000" },
+  videoFallback: { padding: spacing.xl, borderRadius: radius.lg, backgroundColor: colors.surfaceTertiary, alignItems: "center", gap: spacing.sm },
+  videoFallbackText: { color: colors.onSurface, fontWeight: "600" },
 });

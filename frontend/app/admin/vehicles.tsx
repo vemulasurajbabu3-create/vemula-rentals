@@ -90,6 +90,7 @@ function VehicleSheet({ visible, initial, onClose, onSaved }: { visible: boolean
   const [rent, setRent] = useState(String(initial?.weekly_rent || ""));
   const [deposit, setDeposit] = useState(String(initial?.security_deposit ?? "2000"));
   const [imageUrl, setImageUrl] = useState(initial?.image_url || "");
+  const [walkVideo, setWalkVideo] = useState(initial?.walk_around_video || "");
   const [instructions, setInstructions] = useState((initial?.instructions || []).join("\n"));
   const [saving, setSaving] = useState(false);
 
@@ -100,6 +101,7 @@ function VehicleSheet({ visible, initial, onClose, onSaved }: { visible: boolean
         vehicle_type: vt, model, number_plate: plate, weekly_rent: Number(rent) || 0,
         security_deposit: Number(deposit) || 0,
         image_url: imageUrl || null,
+        walk_around_video: walkVideo || null,
         instructions: instructions.split("\n").map((s) => s.trim()).filter(Boolean),
       };
       if (initial) {
@@ -145,6 +147,53 @@ function VehicleSheet({ visible, initial, onClose, onSaved }: { visible: boolean
               </Pressable>
             </View>
             {imageUrl ? <Image source={{ uri: imageUrl }} style={{ width: "100%", height: 140, borderRadius: 12, marginBottom: spacing.md }} contentFit="cover" /> : null}
+
+            <Text style={styles.fieldLabel}>Walk-around Video (optional)</Text>
+            <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md }}>
+              <Pressable testID="vehicle-video-camera" onPress={async () => {
+                const perm = await ImagePicker.requestCameraPermissionsAsync();
+                if (!perm.granted) return;
+                const r = await ImagePicker.launchCameraAsync({ mediaTypes: "videos", videoMaxDuration: 30, quality: 0.5 });
+                if (!r.canceled && r.assets?.[0]?.uri) {
+                  const blob = await (await fetch(r.assets[0].uri)).blob();
+                  const b64: string = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                  });
+                  setWalkVideo(b64);
+                }
+              }} style={({ pressed }) => [styles.photoBtn, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="videocam" size={16} color={colors.brandPrimary} />
+                <Text style={styles.photoBtnText}>Record</Text>
+              </Pressable>
+              <Pressable testID="vehicle-video-gallery" onPress={async () => {
+                const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (!perm.granted) return;
+                const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "videos", videoMaxDuration: 30, quality: 0.5 });
+                if (!r.canceled && r.assets?.[0]?.uri) {
+                  const blob = await (await fetch(r.assets[0].uri)).blob();
+                  const b64: string = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                  });
+                  setWalkVideo(b64);
+                }
+              }} style={({ pressed }) => [styles.photoBtn, pressed && { opacity: 0.85 }]}>
+                <Ionicons name="film" size={16} color={colors.brandPrimary} />
+                <Text style={styles.photoBtnText}>From Gallery</Text>
+              </Pressable>
+              {walkVideo ? (
+                <Pressable testID="vehicle-video-clear" onPress={() => setWalkVideo("")} style={({ pressed }) => [styles.photoBtn, pressed && { opacity: 0.85 }, { borderColor: colors.error, backgroundColor: colors.error + "11" }]}>
+                  <Ionicons name="trash" size={16} color={colors.error} />
+                  <Text style={[styles.photoBtnText, { color: colors.error }]}>Remove</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {walkVideo ? <Text style={{ color: colors.brandPrimary, fontSize: type.sm, marginTop: -spacing.sm, marginBottom: spacing.md }}>✓ Video attached</Text> : null}
             <Field label="Instructions (one per line)" value={instructions} onChange={setInstructions} testID="field-instructions" multiline />
             <Pressable testID="save-vehicle-button" onPress={save} disabled={saving} style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.85 }, saving && { opacity: 0.5 }]}>
               {saving ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.saveText}>{initial ? "Save Changes" : "Create Vehicle"}</Text>}
