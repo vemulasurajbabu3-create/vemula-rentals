@@ -859,10 +859,10 @@ async def admin_delete_user(uid: str, admin: dict = Depends(admin_required)):
     target = await db.users.find_one({"id": uid}, {"_id": 0})
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    if target.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Cannot delete an admin account")
     if uid == admin.get("id"):
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    if target.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Cannot delete an admin account")
 
     # Release any vehicle assigned to the user
     released_vehicle_id: Optional[str] = None
