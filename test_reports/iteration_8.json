@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 8 — Admin Delete User feature tested end-to-end. Backend pytest 4/5 PASS (1 fail = real backend bug: admin self-delete returns 403 instead of spec'd 400 because is_admin check runs before self-check). Frontend Playwright flow verified: admin UI login → /admin/users Approved tab → delete-user-{uid} button visible on customer row only (admin row correctly omitted) → confirm-delete-card shows with rider name/phone + warning list → Cancel keeps user in list → Yes, Delete removes the row, modal closes, and GET /api/admin/users no longer returns the user.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "DELETE /api/admin/users/{uid} (self)",
+        "issue": "Spec says admin deleting their own id → 400 'You cannot delete your own account', but implementation returns 403 'Cannot delete an admin account' because the is_admin check (line 862) runs before the self-check (line 864). Reorder the two checks (self-check first) to match spec.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_delete_user.py",
+    "/app/test_reports/pytest/it8_delete_user.xml",
+    "/app/test_reports/screens/it8_confirm_card.jpeg",
+    "/app/test_reports/screens/it8_after_delete.jpeg"
+  ],
+  "action_items": [
+    "Reorder checks in admin_delete_user (server.py L851-865): move `if uid == admin.get('id')` (400) BEFORE `if target.get('is_admin')` (403) so admin self-delete returns 400 as spec'd. This is the only assertion failure in the new pytest suite."
+  ],
+  "critical_code_review_comments": [
+    "server.py admin_delete_user cascade is comprehensive and correct: releases vehicle, cancels active bookings (kept for audit with admin_notes='User account deleted by admin'), hard-deletes payments/deposits/documents/locations/notifications, broadcasts admin notification. Response shape matches spec exactly.",
+    "Frontend admin/users.tsx correctly filters users.filter(u => !u.is_admin) before rendering, so admin rows are never deletable in UI (verified — no [data-testid=delete-user-{admin_uid}] in DOM)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_delete_user.py (new, 5 tests)"
+  ],
+  "success_rate": {
+    "backend": "80% (4/5 pytest cases — 1 spec-violation as detailed above)",
+    "frontend": "100% (all 5 Playwright steps green)"
+  },
+  "seed_data_creation": "Each test class creates its own fresh customer via /api/auth/request-otp + verify-otp + admin approve. The cascade test additionally creates a TEST vehicle (security_deposit=500), a paid ₹500 deposit, an assignment + paid weekly payment, then deletes everything. Other-admin test inserts a fake admin row directly into mongo and removes it in finally. Frontend run creates and deletes its customer in the same session.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend cascade is sound. Frontend testIDs delete-user-{uid}, confirm-delete-card, cancel-delete-user, confirm-delete-user all wired. Only outstanding work: the 1-line reorder of self-check vs is_admin-check in /app/backend/server.py admin_delete_user.",
+  "rca_of_issue": "Single backend deviation: in /app/backend/server.py:851-865, the order of guard clauses checks is_admin BEFORE the self-id comparison. Because the admin's own row has is_admin=True, the self-delete path is shadowed by the 403 branch and never reaches the 400 branch. Fix: swap the two `if` blocks so the `uid == admin['id']` check (400) executes first."
+}

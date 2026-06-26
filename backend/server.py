@@ -848,6 +848,73 @@ async def admin_reject_user(uid: str, _: dict = Depends(admin_required)):
     return {"ok": True}
 
 
+@api_router.delete("/admin/users/{uid}")
+async def admin_delete_user(uid: str, admin: dict = Depends(admin_required)):
+    """Permanently remove a user and ALL related data.
+
+    Cascades: payments, deposits, bookings, documents, locations, notifications.
+    Releases any vehicle the user has assigned (status -> available, assigned_to=null).
+    Cannot delete self or another admin (use Mongo directly for that).
+    """
+    target = await db.users.find_one({"id": uid}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Cannot delete an admin account")
+    if uid == admin.get("id"):
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    # Release any vehicle assigned to the user
+    released_vehicle_id: Optional[str] = None
+    veh = await db.vehicles.find_one({"assigned_to": uid}, {"_id": 0})
+    if veh:
+        released_vehicle_id = veh["id"]
+        await db.vehicles.update_one(
+            {"id": veh["id"]},
+            {"$set": {"assigned_to": None, "status": "available", "rental_start_date": None}},
+        )
+
+    # Close any active/return-requested bookings as cancelled (audit trail)
+    await db.bookings.update_many(
+        {"user_id": uid, "status": {"$in": ["active", "return_requested"]}},
+        {"$set": {
+            "status": "cancelled",
+            "end_date": now_utc_iso(),
+            "admin_notes": "User account deleted by admin",
+        }},
+    )
+
+    # Hard delete user-owned records
+    deleted_counts = {
+        "payments": (await db.payments.delete_many({"user_id": uid})).deleted_count,
+        "deposits": (await db.deposits.delete_many({"user_id": uid})).deleted_count,
+        "documents": (await db.documents.delete_many({"user_id": uid})).deleted_count,
+        "locations": (await db.locations.delete_many({"user_id": uid})).deleted_count,
+        "notifications": (await db.notifications.delete_many({"user_id": uid})).deleted_count,
+        # We keep bookings for business audit history; flagged as cancelled above.
+    }
+
+    # Finally remove the user record
+    await db.users.delete_one({"id": uid})
+
+    # Broadcast a one-off admin notification (audit log)
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": None,
+        "title": "User Removed",
+        "body": f"{target.get('full_name') or target.get('phone')} was deleted by admin.",
+        "read": False,
+        "created_at": now_utc_iso(),
+    })
+
+    return {
+        "ok": True,
+        "deleted_user_id": uid,
+        "released_vehicle_id": released_vehicle_id,
+        "cascade_deleted": deleted_counts,
+    }
+
+
 @api_router.get("/admin/stats")
 async def admin_stats(_: dict = Depends(admin_required)):
     total_vehicles = await db.vehicles.count_documents({})

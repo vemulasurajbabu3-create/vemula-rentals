@@ -394,3 +394,43 @@ agent_communication_iter7:
   - agent: "testing"
     message: "Iteration 7: Weekly/Wallet segmented control on /customer/payments fully verified end-to-end (default Weekly, Wallet tab card+list, deposit-card hidden in Weekly, weekly UPI mark-paid → 'Paid · UPI', admin Cash mark-paid → 'Paid · Cash' with CASH- txn). One MEDIUM UX bug remains: Top-Up Wallet bottom sheet is not scrollable on web/small screens; 'Continue to UPI' button is ~700px below the fold. Otherwise GREEN. No backend changes required."
 
+# ============= Iteration 8: Admin Delete User =============
+
+backend_iter8:
+  - task: "DELETE /api/admin/users/{uid} cascade"
+    file: "/app/backend/server.py"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Pytest 4/5 PASS at /app/backend/tests/test_admin_delete_user.py.
+          PASS: full cascade (vehicle released to available, payments/deposits/documents wiped, active booking flipped to cancelled with admin_notes, user removed from GET /admin/users, response shape ok+deleted_user_id+released_vehicle_id+cascade_deleted{...}).
+          PASS: 404 on missing uid.
+          PASS: 403 when non-admin caller invokes endpoint (admin_required dependency).
+          PASS: 403 when target is another admin (seeded via mongo).
+          FAIL (spec deviation): admin deleting OWN id returns 403 'Cannot delete an admin account' instead of spec'd 400 'You cannot delete your own account'. Root cause: server.py L862-865 — the is_admin check runs BEFORE the self-id check. Reorder the two `if` blocks (self first) to match spec. Functionally still safe (can't delete self), just wrong status code.
+
+frontend_iter8:
+  - task: "Admin Users: trash icon + confirm card + cascade"
+    file: "/app/frontend/app/admin/users.tsx"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          PASS (iter8) — Playwright on 390x844 web preview, UI login as 9999999999.
+          • /admin/users Approved tab renders delete-user-{cust_uid} red trash button on every non-admin row.
+          • Admin's OWN row does NOT render delete-user-{admin_uid} (users.filter(u => !u.is_admin) at L129).
+          • Tap delete → confirm-delete-card opens with rider name 'Unnamed Rider' + phone '+91 7775286717' + warning list (account+login, payments/deposits/documents, booking history kept as Cancelled).
+          • Tap cancel-delete-user → card closes, row still in list.
+          • Tap delete again → tap confirm-delete-user → DELETE /api/admin/users/{uid} → 200 → card closes → list refresh → row gone → GET /api/admin/users no longer lists the user.
+          Screenshots: /app/test_reports/screens/it8_confirm_card.jpeg, it8_after_delete.jpeg.
+
+agent_communication_iter8:
+  - agent: "testing"
+    message: |
+      Iteration 8 GREEN end-to-end on the new admin-delete-user feature. Backend pytest 4/5 (one spec-violation: admin self-delete returns 403 not 400 due to guard-clause order in server.py admin_delete_user). Frontend UI flow fully verified — trash icon, confirm card, cancel keeps user, confirm removes user and refreshes the list. Action: swap the two `if` guards (self-check BEFORE is_admin-check) in server.py L851-865.
+

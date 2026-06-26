@@ -25,6 +25,8 @@ export default function AdminUsers() {
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [busy, setBusy] = useState<string>("");
+  const [confirmDelete, setConfirmDelete] = useState<U | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300);
@@ -76,6 +78,18 @@ export default function AdminUsers() {
       await api(`/admin/users/${uid}/forfeit-deposit`, { method: "POST", body: { amount: amt, reason } });
       load();
     } catch (e: any) { alert(e?.message || "Forfeit failed"); }
+  };
+
+  const removeUser = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await api(`/admin/users/${confirmDelete.id}`, { method: "DELETE" });
+      setConfirmDelete(null);
+      await load();
+    } catch (e: any) {
+      alert(e?.message || "Delete failed");
+    } finally { setDeleting(false); }
   };
 
   const availableV = useMemo(() => vehicles.filter((v) => !v.assigned_to || v.assigned_to === assignFor?.id), [vehicles, assignFor]);
@@ -168,6 +182,13 @@ export default function AdminUsers() {
                 <Pressable testID={`wa-${item.id}`} onPress={() => whatsappBusiness(`Hi, regarding rider +91 ${item.phone}`)} style={[styles.actBtnIcon]}>
                   <Ionicons name="logo-whatsapp" size={16} color={colors.brandPrimary} />
                 </Pressable>
+                <Pressable
+                  testID={`delete-user-${item.id}`}
+                  onPress={() => setConfirmDelete(item)}
+                  style={[styles.actBtnIcon, { borderColor: colors.error }]}
+                >
+                  <Ionicons name="trash" size={16} color={colors.error} />
+                </Pressable>
               </View>
             </View>
           );
@@ -201,6 +222,60 @@ export default function AdminUsers() {
                 );
               })}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={!!confirmDelete} transparent animationType="fade" onRequestClose={() => setConfirmDelete(null)}>
+        <Pressable style={styles.dimBackdrop} onPress={() => !deleting && setConfirmDelete(null)}>
+          <Pressable style={styles.confirmCard} onPress={(e) => e.stopPropagation()} testID="confirm-delete-card">
+            <View style={[styles.iconCircle, { backgroundColor: colors.error + "22" }]}>
+              <Ionicons name="trash" size={26} color={colors.error} />
+            </View>
+            <Text style={styles.confirmTitle}>Remove this user?</Text>
+            <Text style={styles.confirmName}>{confirmDelete?.full_name || "Unnamed Rider"}</Text>
+            <Text style={styles.confirmPhone}>+91 {confirmDelete?.phone}</Text>
+            <View style={styles.warnBox}>
+              <Text style={styles.warnLine}>This will permanently delete:</Text>
+              <Text style={styles.warnItem}>• Their account & login</Text>
+              <Text style={styles.warnItem}>• All payments, deposits & documents</Text>
+              <Text style={styles.warnItem}>• Location history & notifications</Text>
+              {confirmDelete?.assigned_vehicle ? (
+                <Text style={[styles.warnItem, { color: colors.warning, fontWeight: "700" }]}>
+                  • Release {confirmDelete?.assigned_vehicle?.model} ({confirmDelete?.assigned_vehicle?.number_plate})
+                </Text>
+              ) : null}
+              {Number(confirmDelete?.deposit_balance || 0) > 0 ? (
+                <Text style={[styles.warnItem, { color: colors.warning, fontWeight: "700" }]}>
+                  • Their ₹{Number(confirmDelete?.deposit_balance || 0).toFixed(0)} deposit balance will be lost
+                </Text>
+              ) : null}
+              <Text style={[styles.warnItem, { marginTop: spacing.sm, fontStyle: "italic" }]}>
+                Booking history is kept (marked Cancelled) for audit.
+              </Text>
+            </View>
+            <View style={styles.confirmBtnRow}>
+              <Pressable
+                testID="cancel-delete-user"
+                onPress={() => !deleting && setConfirmDelete(null)}
+                style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                testID="confirm-delete-user"
+                onPress={removeUser}
+                disabled={deleting}
+                style={({ pressed }) => [styles.deleteBtn, deleting && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
+              >
+                {deleting ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : (
+                  <>
+                    <Ionicons name="trash" size={16} color={colors.onBrandPrimary} />
+                    <Text style={styles.deleteBtnText}>Yes, Delete</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -242,5 +317,19 @@ const styles = StyleSheet.create({
   sheetBody: { color: colors.onSurfaceSecondary, marginTop: spacing.xs, marginBottom: spacing.md },
   vRow: { flexDirection: "row", alignItems: "center", padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.divider, marginBottom: spacing.sm },
   vModel: { fontSize: type.base, fontWeight: "700", color: colors.onSurface },
-  vPlate: { color: colors.onSurfaceSecondary, marginTop: 2, fontSize: type.sm },
+  vPlate: { color: colors.onSurfaceSecondary, fontSize: type.sm, marginTop: 2 },
+  dimBackdrop: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.55)", padding: spacing.xl },
+  confirmCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl, width: "100%", maxWidth: 360, alignItems: "center" },
+  iconCircle: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", marginBottom: spacing.md },
+  confirmTitle: { fontSize: type.xl, fontWeight: "800", color: colors.onSurface, textAlign: "center" },
+  confirmName: { fontSize: type.lg, fontWeight: "700", color: colors.onSurface, marginTop: spacing.sm },
+  confirmPhone: { fontSize: type.sm, color: colors.onSurfaceSecondary, marginBottom: spacing.md },
+  warnBox: { backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, alignSelf: "stretch" },
+  warnLine: { fontSize: type.sm, color: colors.onSurface, fontWeight: "700", marginBottom: spacing.xs },
+  warnItem: { fontSize: type.sm, color: colors.onSurfaceSecondary, lineHeight: 18, marginTop: 2 },
+  confirmBtnRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg, alignSelf: "stretch" },
+  cancelBtn: { flex: 1, height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  cancelBtnText: { color: colors.onSurface, fontWeight: "700", fontSize: type.base },
+  deleteBtn: { flex: 1, flexDirection: "row", gap: 6, height: 48, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: colors.error },
+  deleteBtnText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: type.base },
 });
