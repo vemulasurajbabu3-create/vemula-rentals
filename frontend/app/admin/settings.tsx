@@ -6,11 +6,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { colors, spacing, radius, type, shadow } from "@/src/theme";
 
-const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]; void WEEKDAYS;
 
 type S = {
   reminder_weekday: number;
   reminder_hour_ist: number;
+  reminder_lead_hours?: number;
+  reminder_overdue_repeat_days?: number;
   late_fee_per_day: number;
   grace_days: number;
   min_deposit?: number;
@@ -58,29 +60,30 @@ export default function AdminSettings() {
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}>
         {/* Reminder schedule */}
-        <Text style={styles.section}>Weekly Reminder Schedule</Text>
+        <Text style={styles.section}>Per-Rider Reminders</Text>
         <View style={[styles.card, shadow.card]}>
-          <Text style={styles.label}>Day of week</Text>
-          <View style={styles.chipsRow}>
-            {WEEKDAYS.map((w, i) => (
-              <Pressable
-                key={w}
-                testID={`weekday-${i}`}
-                onPress={() => update({ reminder_weekday: i })}
-                style={[styles.chip, s.reminder_weekday === i && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, s.reminder_weekday === i && styles.chipTextActive]}>{w.slice(0, 3)}</Text>
-              </Pressable>
-            ))}
+          <View style={styles.infoBanner}>
+            <Ionicons name="information-circle" size={18} color={colors.brandPrimary} />
+            <Text style={styles.infoBannerText}>
+              Reminders are now scheduled per rider based on their own vehicle assignment date — there is no global day/hour anymore. Each weekly payment is anchored to assignment time + 7n days.
+            </Text>
           </View>
 
-          <Text style={[styles.label, { marginTop: spacing.lg }]}>Hour of day (IST, 0-23)</Text>
+          <Text style={styles.label}>Lead time before due (hours)</Text>
           <View style={styles.stepperRow}>
-            <Pressable testID="hour-dec" onPress={() => update({ reminder_hour_ist: Math.max(0, s.reminder_hour_ist - 1) })} style={styles.stepBtn}><Ionicons name="remove" size={18} color={colors.onSurface} /></Pressable>
-            <Text style={styles.stepperValue} testID="hour-value">{s.reminder_hour_ist.toString().padStart(2, "0")}:00 IST</Text>
-            <Pressable testID="hour-inc" onPress={() => update({ reminder_hour_ist: Math.min(23, s.reminder_hour_ist + 1) })} style={styles.stepBtn}><Ionicons name="add" size={18} color={colors.onSurface} /></Pressable>
+            <Pressable testID="lead-dec" onPress={() => update({ reminder_lead_hours: Math.max(1, (s.reminder_lead_hours ?? 24) - 1) })} style={styles.stepBtn}><Ionicons name="remove" size={18} color={colors.onSurface} /></Pressable>
+            <Text style={styles.stepperValue} testID="lead-value">{(s.reminder_lead_hours ?? 24).toString()} h</Text>
+            <Pressable testID="lead-inc" onPress={() => update({ reminder_lead_hours: Math.min(168, (s.reminder_lead_hours ?? 24) + 1) })} style={styles.stepBtn}><Ionicons name="add" size={18} color={colors.onSurface} /></Pressable>
           </View>
-          <Text style={styles.hint}>Reminders will fire every {WEEKDAYS[s.reminder_weekday]} at {s.reminder_hour_ist.toString().padStart(2, "0")}:00 IST to all customers with pending dues.</Text>
+          <Text style={styles.hint}>How early before the rider&apos;s own due date a reminder should be sent. 1-168 hours.</Text>
+
+          <Text style={[styles.label, { marginTop: spacing.lg }]}>Overdue repeat (days)</Text>
+          <View style={styles.stepperRow}>
+            <Pressable testID="overdue-dec" onPress={() => update({ reminder_overdue_repeat_days: Math.max(1, (s.reminder_overdue_repeat_days ?? 7) - 1) })} style={styles.stepBtn}><Ionicons name="remove" size={18} color={colors.onSurface} /></Pressable>
+            <Text style={styles.stepperValue} testID="overdue-value">{(s.reminder_overdue_repeat_days ?? 7).toString()} d</Text>
+            <Pressable testID="overdue-inc" onPress={() => update({ reminder_overdue_repeat_days: Math.min(30, (s.reminder_overdue_repeat_days ?? 7) + 1) })} style={styles.stepBtn}><Ionicons name="add" size={18} color={colors.onSurface} /></Pressable>
+          </View>
+          <Text style={styles.hint}>If a payment is overdue, repeat the reminder every {(s.reminder_overdue_repeat_days ?? 7).toString()} day(s) until it is paid.</Text>
         </View>
 
         {/* Late fee */}

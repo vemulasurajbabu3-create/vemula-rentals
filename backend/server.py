@@ -191,8 +191,10 @@ class NotificationCreate(BaseModel):
 
 
 class SettingsModel(BaseModel):
-    reminder_weekday: int = 0
-    reminder_hour_ist: int = 9
+    reminder_weekday: int = 0  # legacy — no longer used; kept for back-compat
+    reminder_hour_ist: int = 9  # legacy — no longer used; kept for back-compat
+    reminder_lead_hours: float = 24.0  # send reminder this many hours BEFORE due_date
+    reminder_overdue_repeat_days: float = 7.0  # re-remind every N days while overdue
     late_fee_per_day: float = 50.0
     grace_days: int = 0
     block_after_days: int = 7  # auto-suspend vehicle after N days overdue
@@ -208,6 +210,8 @@ class SettingsModel(BaseModel):
 class SettingsUpdate(BaseModel):
     reminder_weekday: Optional[int] = None
     reminder_hour_ist: Optional[int] = None
+    reminder_lead_hours: Optional[float] = None
+    reminder_overdue_repeat_days: Optional[float] = None
     late_fee_per_day: Optional[float] = None
     grace_days: Optional[int] = None
     block_after_days: Optional[int] = None
@@ -1073,6 +1077,8 @@ async def admin_get_settings(_: dict = Depends(admin_required)):
     return {
         "reminder_weekday": s.get("reminder_weekday", 0),
         "reminder_hour_ist": s.get("reminder_hour_ist", 9),
+        "reminder_lead_hours": s.get("reminder_lead_hours", 24.0),
+        "reminder_overdue_repeat_days": s.get("reminder_overdue_repeat_days", 7.0),
         "late_fee_per_day": s.get("late_fee_per_day", 50.0),
         "grace_days": s.get("grace_days", 0),
         "block_after_days": s.get("block_after_days", 7),
@@ -1111,6 +1117,10 @@ async def admin_update_settings(body: SettingsUpdate, _: dict = Depends(admin_re
             raise HTTPException(status_code=400, detail="reminder_weekday must be 0-6")
         if "reminder_hour_ist" in upd and not 0 <= upd["reminder_hour_ist"] <= 23:
             raise HTTPException(status_code=400, detail="reminder_hour_ist must be 0-23")
+        if "reminder_lead_hours" in upd and not 1 <= upd["reminder_lead_hours"] <= 168:
+            raise HTTPException(status_code=400, detail="reminder_lead_hours must be between 1 and 168")
+        if "reminder_overdue_repeat_days" in upd and not 1 <= upd["reminder_overdue_repeat_days"] <= 30:
+            raise HTTPException(status_code=400, detail="reminder_overdue_repeat_days must be between 1 and 30")
         if "late_fee_per_day" in upd and upd["late_fee_per_day"] < 0:
             raise HTTPException(status_code=400, detail="late_fee_per_day must be >= 0")
         if "grace_days" in upd and upd["grace_days"] < 0:
@@ -1515,43 +1525,88 @@ async def admin_confirm_return(bid: str, body: ConfirmReturnIn, _: dict = Depend
 
 # -------------------- WEEKLY REMINDER SCHEDULER --------------------
 async def _create_reminders_for_pending():
-    """Send a reminder to every customer with a pending payment + a summary to admin."""
+    """Per-user weekly reminders.
+
+    Each pending payment is reminded based on ITS OWN due_date (anchored to the
+    customer's vehicle assignment date), NOT a global weekday/hour. We send
+    once before due (within `reminder_lead_hours`), and then repeat every
+    `reminder_overdue_repeat_days` while overdue.
+    """
     now = datetime.now(timezone.utc)
     settings = await get_settings_doc()
+    lead_hours = float(settings.get("reminder_lead_hours", 24.0))
+    overdue_repeat_days = float(settings.get("reminder_overdue_repeat_days", 7.0))
     cursor = db.payments.find({"status": "pending"}, {"_id": 0})
     sent_count = 0
     async for p in cursor:
-        # Avoid spamming: skip if a reminder was already sent in the last 6 days
+        try:
+            due = datetime.fromisoformat(p["due_date"])
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        hours_to_due = (due - now).total_seconds() / 3600.0
+        is_overdue = hours_to_due < 0
+
+        # Too early — wait until we're inside the lead window
+        if not is_overdue and hours_to_due > lead_hours:
+            continue
+
+        # Throttle: parse last sent
         last_at = p.get("reminder_sent_at")
+        last_dt: Optional[datetime] = None
         if last_at:
             try:
-                la = datetime.fromisoformat(last_at)
-                if la.tzinfo is None:
-                    la = la.replace(tzinfo=timezone.utc)
-                if (now - la).total_seconds() < 6 * 86400:
-                    continue
+                last_dt = datetime.fromisoformat(last_at)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
             except Exception:
-                pass
+                last_dt = None
+
+        # Already reminded once for the pre-due window → wait for overdue repeats
+        if not is_overdue and last_dt is not None:
+            continue
+        # Overdue: respect the repeat cadence
+        if is_overdue and last_dt is not None:
+            if (now - last_dt).total_seconds() / 86400.0 < overdue_repeat_days:
+                continue
+
         user = await db.users.find_one({"id": p["user_id"]}, {"_id": 0})
+        if not user:
+            continue
         veh = await db.vehicles.find_one({"id": p.get("vehicle_id")}, {"_id": 0}) if p.get("vehicle_id") else None
         try:
-            due_str = datetime.fromisoformat(p["due_date"]).strftime("%d %b")
+            due_str = due.astimezone(IST).strftime("%a %d %b, %I:%M %p")
         except Exception:
-            due_str = ""
+            due_str = p["due_date"]
         late_fee = float(p.get("late_fee", 0.0))
         total = float(p["amount"]) + late_fee
         fee_line = f" (incl. ₹{late_fee:.0f} late fee)" if late_fee > 0 else ""
+
+        if is_overdue:
+            title = "Payment Overdue"
+            days_late = max(1, int(abs(hours_to_due) // 24))
+            body = (
+                f"Your weekly rent of ₹{total:.0f}{fee_line} was due on {due_str}. "
+                f"{days_late} day{'s' if days_late != 1 else ''} late — pay via UPI or cash now."
+            )
+        else:
+            title = "Weekly Payment Reminder"
+            hrs = max(1, int(round(hours_to_due)))
+            body = (
+                f"Your weekly rent of ₹{total:.0f}{fee_line} is due on {due_str} "
+                f"(~{hrs}h). Pay via UPI from the Payments tab."
+            )
         await db.notifications.insert_one({
             "id": str(uuid.uuid4()), "user_id": p["user_id"],
-            "title": "Weekly Payment Reminder",
-            "body": f"Your weekly rent of ₹{total:.0f}{fee_line} is due on {due_str}. Pay via UPI from the Payments tab.",
+            "title": title, "body": body,
             "read": False, "created_at": now_utc_iso(),
         })
         rider = (user.get("full_name") if user else None) or (user.get("phone") if user else "Rider")
         veh_text = f"{veh['model']} ({veh['number_plate']})" if veh else "Vehicle"
         await db.notifications.insert_one({
             "id": str(uuid.uuid4()), "user_id": None,
-            "title": "Payment Reminder Sent",
+            "title": "Reminder Sent" if not is_overdue else "Overdue Reminder Sent",
             "body": f"{rider} · {veh_text} · ₹{total:.0f}{fee_line} due {due_str}",
             "read": False, "created_at": now_utc_iso(),
         })
@@ -1567,28 +1622,26 @@ async def _create_reminders_once():
 
 
 async def scheduler_loop():
-    """Runs forever, wakes up every 5 minutes.
-    - Daily at any time: recompute late fees (idempotent).
-    - On configured weekday at configured IST hour: send reminders (once per day, idempotent via last_fired_date)."""
+    """Runs forever, wakes every 5 minutes.
+
+    * Recomputes late fees (idempotent).
+    * For EACH pending payment, sends a reminder when we're within its own
+      lead window — independent of any global weekday/hour. This makes
+      reminders truly per-user, anchored to each rider's assignment date.
+    """
     await asyncio.sleep(15)
     while True:
         try:
             await _compute_late_fees_once()
-            settings = await get_settings_doc()
-            now_ist = datetime.now(IST)
-            today_key = now_ist.strftime("%Y-%m-%d")
-            target_wd = int(settings.get("reminder_weekday", 0))
-            target_hr = int(settings.get("reminder_hour_ist", 9))
-            if now_ist.weekday() == target_wd and now_ist.hour == target_hr:
-                state = await db.scheduler_state.find_one({"id": "reminders"}, {"_id": 0})
-                if not state or state.get("last_fired_date") != today_key:
-                    count = await _create_reminders_for_pending()
-                    await db.scheduler_state.update_one(
-                        {"id": "reminders"},
-                        {"$set": {"id": "reminders", "last_fired_date": today_key, "last_fired_at": now_utc_iso(), "last_count": count}},
-                        upsert=True,
-                    )
-                    logging.getLogger(__name__).info(f"Weekly reminders fired at IST {now_ist.isoformat()} for {count} payment(s).")
+            count = await _create_reminders_for_pending()
+            if count > 0:
+                now_iso = now_utc_iso()
+                await db.scheduler_state.update_one(
+                    {"id": "reminders"},
+                    {"$set": {"id": "reminders", "last_fired_at": now_iso, "last_count": count}},
+                    upsert=True,
+                )
+                logging.getLogger(__name__).info(f"Per-user reminders fired for {count} payment(s) at {now_iso}.")
         except Exception as e:
             logging.getLogger(__name__).warning(f"Scheduler loop error: {e}")
         await asyncio.sleep(300)  # 5 minutes
