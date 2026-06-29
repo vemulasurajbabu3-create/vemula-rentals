@@ -819,11 +819,27 @@ async def admin_list_users(q: Optional[str] = None, status: Optional[str] = None
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"full_name": rx}, {"phone": rx}, {"address": rx}]
     items = await db.users.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    if not items:
+        return []
+    user_ids = [u["id"] for u in items]
+
+    # Batch-fetch vehicles assigned to any of these users (one query)
+    veh_cursor = db.vehicles.find({"assigned_to": {"$in": user_ids}}, {"_id": 0})
+    veh_by_user: dict = {}
+    async for v in veh_cursor:
+        veh_by_user[v["assigned_to"]] = v
+
+    # Batch-aggregate deposit balance for all users (one aggregation)
+    agg = db.deposits.aggregate([
+        {"$match": {"user_id": {"$in": user_ids}, "status": "paid"}},
+        {"$group": {"_id": "$user_id", "balance": {"$sum": "$amount"}}},
+    ])
+    bal_by_user: dict = {row["_id"]: float(row.get("balance", 0.0)) async for row in agg}
+
     out = []
     for u in items:
-        v = await db.vehicles.find_one({"assigned_to": u["id"]}, {"_id": 0})
-        u["assigned_vehicle"] = v
-        u["deposit_balance"] = await get_user_deposit_balance(u["id"])
+        u["assigned_vehicle"] = veh_by_user.get(u["id"])
+        u["deposit_balance"] = bal_by_user.get(u["id"], 0.0)
         if "status" not in u:
             u["status"] = "approved"
         out.append(u)
