@@ -3,6 +3,8 @@
     "name": "Vemula Rentals",
     "slug": "frontend",
     "version": "1.0.0",
+    "nodeModulesPath": "./frontend/node_modules",
+    "jsEngine": "hermes",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vemularentals",
@@ -21,9 +23,12 @@
           "location",
           "fetch"
         ]
-      }
+      },
+      "bundleIdentifier": "app.emergent.rentwheelconnect4adfd86d"
     },
     "android": {
+      "package": "com.vemulaenterprises.app",
+      "jsEngine": "hermes",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000"
@@ -47,7 +52,10 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-image-picker",
       "expo-router",
+      "expo-contacts",
+      "expo-splash-screen",
       [
         "expo-location",
         {

@@ -434,3 +434,28 @@ agent_communication_iter8:
     message: |
       Iteration 8 GREEN end-to-end on the new admin-delete-user feature. Backend pytest 4/5 (one spec-violation: admin self-delete returns 403 not 400 due to guard-clause order in server.py admin_delete_user). Frontend UI flow fully verified — trash icon, confirm card, cancel keeps user, confirm removes user and refreshes the list. Action: swap the two `if` guards (self-check BEFORE is_admin-check) in server.py L851-865.
 
+
+
+frontend_iter10:
+  - task: "Fix ConfigError: package.json main field"
+    file: "/app/frontend/package.json"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Iter10 VERIFIED — mobile preview ConfigError bug FIXED.
+          1) /app/frontend/package.json L3 confirmed exactly: "main": "expo-router/entry". No bogus "frontend/" prefix.
+          2) /app/frontend/node_modules/expo-router/entry.js exists and resolves.
+          3) curl http://localhost:3000/ -> HTTP 200 with Metro-served HTML bundle (title <title>Vemula Rentals</title>, 1287 bytes). No error page.
+          4) grep ConfigError /var/log/supervisor/expo.err.log -> 0 hits. Fresh expo.out.log shows clean "Starting Metro Bundler" + "Waiting on http://localhost:3000".
+          5) Playwright 390x844 web preview: /auth/login renders "Vemula Rentals" heading + "Send OTP" button. Screenshot: /app/test_reports/screens/it10_login_after_fix.jpeg.
+          6) Regression e2e: entered phone 9999999999 → Send OTP → typed 123456 into the 6-digit split OTP input → Verify & Continue → navigated to http://localhost:3000/admin/dashboard, Business Dashboard rendered (2 vehicles, 0 rentals, 1 user, ₹0 earned). Screenshot: /app/test_reports/screens/it10_admin_dashboard.jpeg.
+          7) Console: no entry-file/resolution errors. Only pre-existing style deprecation warnings ("pointerEvents", "shadow*") — unrelated to this fix.
+          Report: /app/test_reports/iteration_10.json.
+
+agent_communication_iter10:
+  - agent: "testing"
+    message: |
+      Iter10 GREEN. Mobile preview ConfigError is fully resolved by "main": "expo-router/entry" in package.json. Metro serves /, /auth/login renders, full OTP-login regression to /admin/dashboard passes. No further action required for this bug.

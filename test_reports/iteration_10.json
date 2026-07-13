@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 10 verification of mobile-preview ConfigError fix (package.json main field). All 5 required verification steps + regression OTP login e2e PASS. Metro serves the bundle, /auth/login renders 'Vemula Rentals' + 'Send OTP', OTP flow with admin phone 9999999999 lands on /admin/dashboard. No ConfigError in fresh expo logs. No new issues introduced.",
+  "verification_steps": [
+    {"step": 1, "check": "package.json main == 'expo-router/entry'", "result": "PASS", "note": "/app/frontend/package.json L3 confirmed exactly 'expo-router/entry'."},
+    {"step": 2, "check": "curl http://localhost:3000/ returns 200 with Metro HTML", "result": "PASS", "note": "HTTP 200, 1287 bytes, contains <title>Vemula Rentals</title> and expo-reset style block."},
+    {"step": 3, "check": "Playwright login screen renders", "result": "PASS", "note": "Heading 'Vemula Rentals' and 'Send OTP' button visible. Screenshot at /app/test_reports/screens/it10_login_after_fix.jpeg."},
+    {"step": 4, "check": "No ConfigError in expo.err.log post-restart", "result": "PASS", "note": "grep -c ConfigError /var/log/supervisor/expo.err.log => 0. Only benign 'No license field' warning present."},
+    {"step": 5, "check": "Regression: 9999999999 -> OTP -> /admin/dashboard", "result": "PASS", "note": "Verify & Continue navigated to http://localhost:3000/admin/dashboard. Business Dashboard rendered (2 vehicles / 1 user). Screenshot at /app/test_reports/screens/it10_admin_dashboard.jpeg. No entry-file console errors."}
+  ],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "console_warnings_observed": [
+    "props.pointerEvents is deprecated. Use style.pointerEvents (pre-existing, not related to this fix)",
+    "'shadow*' style props are deprecated. Use 'boxShadow' (pre-existing, not related to this fix)"
+  ],
+  "test_report_links": [
+    "/app/test_reports/screens/it10_login_after_fix.jpeg",
+    "/app/test_reports/screens/it10_admin_dashboard.jpeg"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "package.json 'main' is now canonical Expo Router entry — correct.",
+    "Consider addressing pre-existing RN style deprecations (pointerEvents, shadow*) in a separate iteration; not blocking."
+  ],
+  "updated_files": [
+    "/app/test_result.md (appended iter10 block)",
+    "/app/test_reports/iteration_10.json (new)"
+  ],
+  "success_rate": {"backend": "N/A (not requested)", "frontend": "100%"},
+  "seed_data_creation": "None. Existing seeded admin (9999999999) reused; login only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "package.json main is now 'expo-router/entry'. Do not touch it. Web preview at http://localhost:3000 serves the login screen and full OTP e2e flow reaches /admin/dashboard. Style deprecation warnings (pointerEvents/shadow*) are pre-existing across the app.",
+  "rca_of_issue": "Bug: 'main' in /app/frontend/package.json was 'frontend/node_modules/expo-router/entry' — Node/Metro run cwd is /app/frontend, so the extra 'frontend/' segment made the path unresolvable, producing ConfigError at Expo startup. Fix: set 'main' to canonical 'expo-router/entry' (Expo Router auto-resolves node_modules). Verified by: fresh expo start with 0 ConfigError hits, HTTP 200 at /, and full UI+API regression through admin login."
+}

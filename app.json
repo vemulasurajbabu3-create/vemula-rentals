@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "d82a48a4-7dab-414e-89f4-18c1c823fe92"
+      }
+    },
+    "android": {
+      "package": "com.vemulaenterprises.app"
+    }
+  }
+}
