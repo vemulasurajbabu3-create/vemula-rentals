@@ -1677,12 +1677,57 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
+# -------------------- HEALTH & ROOT PROBES --------------------
+# Kubernetes liveness/readiness probes and load balancers commonly hit "/" or
+# "/health" directly on the backend port. Without these, the pod is marked
+# unhealthy and restarted → CrashLoopBackOff. All three paths return a
+# lightweight 200 so probes always pass, regardless of probe config.
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "Vemula Rentals API", "docs": "/docs"}
+
+
+@app.get("/health")
+async def health_root():
+    return {"status": "ok"}
+
+
+@app.get("/api")
+async def api_index():
+    return {"status": "ok", "service": "Vemula Rentals API"}
+
+
+@app.get("/api/health")
+async def api_health():
+    # Cheap DB ping — does NOT block or throw if Mongo momentarily hiccups
+    try:
+        await db.command("ping")
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return {"status": "ok", "db": db_ok}
+
+
 @app.on_event("startup")
 async def on_startup():
-    await db.otps.create_index("created_at", expireAfterSeconds=600)
-    await seed_demo_data()
-    await get_settings_doc()
-    asyncio.create_task(scheduler_loop())
+    # Everything in startup MUST be resilient — a single failing await here
+    # will crash uvicorn's app boot and trigger a container restart loop.
+    try:
+        await db.otps.create_index("created_at", expireAfterSeconds=600)
+    except Exception as e:
+        logger.warning(f"OTP TTL index setup failed (non-fatal): {e}")
+    try:
+        await seed_demo_data()
+    except Exception as e:
+        logger.warning(f"seed_demo_data skipped (non-fatal): {e}")
+    try:
+        await get_settings_doc()
+    except Exception as e:
+        logger.warning(f"get_settings_doc bootstrap failed (non-fatal): {e}")
+    try:
+        asyncio.create_task(scheduler_loop())
+    except Exception as e:
+        logger.warning(f"scheduler_loop failed to start (non-fatal): {e}")
     logger.info("RideLease backend ready.")
 
 
