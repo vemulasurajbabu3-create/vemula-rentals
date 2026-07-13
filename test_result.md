@@ -459,3 +459,35 @@ agent_communication_iter10:
   - agent: "testing"
     message: |
       Iter10 GREEN. Mobile preview ConfigError is fully resolved by "main": "expo-router/entry" in package.json. Metro serves /, /auth/login renders, full OTP-login regression to /admin/dashboard passes. No further action required for this bug.
+
+
+keystore_iter11:
+  - task: "Generate new upload keystore (new-upload-key.jks) + export new-certificate.pem to resolve Google Play fingerprint mismatch"
+    file: "/app/new-upload-key.jks, /app/new-certificate.pem, /app/frontend/credentials.json"
+    needs_retesting: false
+    priority: high
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Iter11 VERIFIED — new upload keystore + certificate fix is GREEN. All 8 verification steps pass.
+          1) /app/new-upload-key.jks exists, 2812 bytes (~2.7KB), PKCS12 keystore (confirmed by `keytool -list`).
+          2) /app/new-certificate.pem exists, 1336 bytes; first line `-----BEGIN CERTIFICATE-----`; last line `-----END CERTIFICATE-----`.
+          3) `keytool -list -v` shows EXACTLY ONE entry: Alias=`upload-key-alias`, Entry type=PrivateKeyEntry, Keystore type=PKCS12.
+          4) `keytool -printcert -file /app/new-certificate.pem`:
+              - Owner: CN=Vemula Rentals, OU=Balajee, O=Vemula Enterprise, L=Hyderabad, ST=Telangana, C=IN ✓
+              - Signature algorithm: SHA256withRSA ✓
+              - Subject Public Key Algorithm: 2048-bit RSA ✓
+              - Valid: Mon Jul 13 06:47:55 UTC 2026 → Fri Nov 28 06:47:55 UTC 2053 (~27 years, ~10000 days) ≥ 25yr min ✓
+              - SHA-256: BB:DE:87:E8:03:61:56:A3:71:23:C5:42:7B:37:DC:30:72:DE:46:76:A9:C6:91:20:EF:5D:BB:2F:79:9B:F6:71
+              - OLD SHA-256 was 19:C3:4F:0C:12:03:85:11:16:2A:66:98:2F:01:AF:8C:41:E7:D3:67:E5:0C:B3:EC:C2:2A:22:BF:C8:05:36:6D — CONFIRMED DIFFERENT ✓ (this is what unblocks the Play fingerprint mismatch)
+          5) `openssl x509 -in /app/new-certificate.pem -text -noout` parses cleanly (Version 3, sha256WithRSAEncryption, 2048-bit RSA modulus, matching Issuer/Subject).
+          6) SHA-256 from keystore -list == SHA-256 from PEM -printcert (BB:DE:87:...:F6:71); SHA-1 also identical (A1:A7:0F:A8:C5:1E:E4:AD:F7:D1:F1:0A:6A:E5:52:47:E5:D6:E6:D0); serial numbers match (0x2e669b71eebd7142). PEM cert IS the public key of the keystore's private key.
+          7) /app/frontend/credentials.json now has keystorePath=`../new-upload-key.jks`, keyAlias=`upload-key-alias` (verified).
+          8) Old /app/my-release-key.jks still present (2772 bytes, mtime Jun 30 16:00) — untouched.
+          Report: /app/test_reports/iteration_11.json.
+
+agent_communication_iter11:
+  - agent: "testing"
+    message: |
+      Iter11 GREEN. Brand-new upload keystore + certificate verified: PKCS12, RSA-2048, SHA256withRSA, ~27-year validity, alias `upload-key-alias`, DN `CN=Vemula Rentals,...`. New SHA-256 fingerprint (BB:DE:87:...:F6:71) is confirmed DIFFERENT from the old (19:C3:4F:...:36:6D), so this fresh key will resolve the Google Play upload-cert fingerprint mismatch once registered. PEM matches keystore's private key (fingerprints + serials identical). credentials.json updated. Old keystore preserved. No code changes needed — build-artifact verification only.

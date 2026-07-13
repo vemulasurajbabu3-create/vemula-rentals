@@ -1,0 +1,45 @@
+{
+  "summary": "Verified brand-new upload keystore + certificate fix for Vemula Rentals (iteration 11). All 8 verification steps passed. New keystore /app/new-upload-key.jks (PKCS12, RSA 2048, SHA256withRSA, ~27yr validity) with alias 'upload-key-alias' was created, matching PEM certificate exported to /app/new-certificate.pem. SHA-256 fingerprint differs from the old cert as required, proving a fresh key that will resolve the Google Play fingerprint mismatch. credentials.json updated. Old my-release-key.jks preserved.",
+  "overall_status": "pass",
+  "verification_steps": [
+    {"step": 1, "description": "new-upload-key.jks exists, non-empty, keystore file", "status": "pass", "actual": "2812 bytes (~2.7KB), PKCS12 keystore (confirmed via keytool -list)", "expected": "exists, ~2-4 KB, keystore/data"},
+    {"step": 2, "description": "new-certificate.pem exists with valid PEM markers", "status": "pass", "actual": "1336 bytes; first line '-----BEGIN CERTIFICATE-----'; last line '-----END CERTIFICATE-----'", "expected": "exists, ~1-2 KB, proper BEGIN/END markers"},
+    {"step": 3, "description": "keytool -list shows exactly one entry with alias upload-key-alias", "status": "pass", "actual": "1 entry, Alias name: upload-key-alias, Entry type: PrivateKeyEntry, Keystore type: PKCS12", "expected": "exactly one entry, alias 'upload-key-alias'"},
+    {"step": 4, "description": "keytool -printcert content matches spec", "status": "pass", "actual": "Owner: CN=Vemula Rentals, OU=Balajee, O=Vemula Enterprise, L=Hyderabad, ST=Telangana, C=IN; Signature: SHA256withRSA; Public Key: 2048-bit RSA; Valid Jul 13 2026 -> Nov 28 2053 (~27 years / ~10000 days); SHA-256: BB:DE:87:E8:03:61:56:A3:71:23:C5:42:7B:37:DC:30:72:DE:46:76:A9:C6:91:20:EF:5D:BB:2F:79:9B:F6:71 (DIFFERENT from old 19:C3:4F:0C:12:03:85:11:16:2A:66:98:2F:01:AF:8C:41:E7:D3:67:E5:0C:B3:EC:C2:2A:22:BF:C8:05:36:6D)", "expected": "CN=Vemula Rentals, SHA256withRSA, 2048-bit RSA, >=25yr validity, SHA-256 != old fingerprint"},
+    {"step": 5, "description": "openssl x509 parses PEM cleanly", "status": "pass", "actual": "openssl parsed successfully: Version 3, Serial 0x2e669b71eebd7142, sha256WithRSAEncryption, 2048-bit RSA modulus, Issuer/Subject match CN=Vemula Rentals", "expected": "no parse errors"},
+    {"step": 6, "description": "PEM cert corresponds to keystore private key (SHA-256 identical)", "status": "pass", "actual": "keystore SHA-256 = BB:DE:87:E8:03:61:56:A3:71:23:C5:42:7B:37:DC:30:72:DE:46:76:A9:C6:91:20:EF:5D:BB:2F:79:9B:F6:71; PEM SHA-256 = BB:DE:87:E8:03:61:56:A3:71:23:C5:42:7B:37:DC:30:72:DE:46:76:A9:C6:91:20:EF:5D:BB:2F:79:9B:F6:71 -> IDENTICAL. SHA-1 also identical (A1:A7:0F:A8:C5:1E:E4:AD:F7:D1:F1:0A:6A:E5:52:47:E5:D6:E6:D0). Serial numbers match (2e669b71eebd7142).", "expected": "identical SHA-256 in both outputs"},
+    {"step": 7, "description": "credentials.json points to new keystore/alias", "status": "pass", "actual": "keystorePath='../new-upload-key.jks', keyAlias='upload-key-alias', keystorePassword='Suraj@123', keyPassword='Suraj@123'", "expected": "keystorePath=../new-upload-key.jks, keyAlias=upload-key-alias"},
+    {"step": 8, "description": "old /app/my-release-key.jks preserved", "status": "pass", "actual": "exists (2772 bytes, mtime Jun 30 16:00) - untouched", "expected": "still exists"}
+  ],
+  "fingerprints_observed": {
+    "new_sha256": "BB:DE:87:E8:03:61:56:A3:71:23:C5:42:7B:37:DC:30:72:DE:46:76:A9:C6:91:20:EF:5D:BB:2F:79:9B:F6:71",
+    "new_sha1": "A1:A7:0F:A8:C5:1E:E4:AD:F7:D1:F1:0A:6A:E5:52:47:E5:D6:E6:D0",
+    "old_sha256_expected_different": "19:C3:4F:0C:12:03:85:11:16:2A:66:98:2F:01:AF:8C:41:E7:D3:67:E5:0C:B3:EC:C2:2A:22:BF:C8:05:36:6D",
+    "fingerprints_differ": true
+  },
+  "certificate_details": {
+    "keystore_path": "/app/new-upload-key.jks",
+    "pem_path": "/app/new-certificate.pem",
+    "keystore_type": "PKCS12",
+    "alias": "upload-key-alias",
+    "algorithm": "SHA256withRSA",
+    "key_size_bits": 2048,
+    "dn": "CN=Vemula Rentals, OU=Balajee, O=Vemula Enterprise, L=Hyderabad, ST=Telangana, C=IN",
+    "valid_from": "Mon Jul 13 06:47:55 UTC 2026",
+    "valid_until": "Fri Nov 28 06:47:55 UTC 2053",
+    "validity_years_approx": 27,
+    "serial_number": "2e669b71eebd7142"
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": ["/app/test_reports/iteration_11.json"],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": ["/app/test_reports/iteration_11.json", "/app/test_result.md"],
+  "success_rate": {"backend": "N/A", "frontend": "N/A", "keystore_verification": "100% (8/8 steps)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Keystore/cert verification only - no app run performed. Old keystore (/app/my-release-key.jks + /app/certificate.pem) intentionally preserved for archival. New PKCS12 keystore uses alias 'upload-key-alias' and password 'Suraj@123'. JDK path: /root/.local/share/code-server/extensions/oracle.oracle-java-26.0.0-universal/out/webviews/jdkDownloader/jdk_downloads/jdk-26.0.1/bin.",
+  "rca_of_issue": "N/A - verification of a fix. Original problem: Google Play rejected uploads due to certificate fingerprint mismatch (old key SHA-256 19:C3:4F:...:36:6D did not match Play's registered upload cert). Fix: fresh keystore generated with new key pair. Verification confirms new SHA-256 (BB:DE:87:...:F6:71) differs from old, so this new key can be registered/used to resolve the mismatch (once Play Console accepts it, e.g., via Play App Signing reset request or new app registration)."
+}
