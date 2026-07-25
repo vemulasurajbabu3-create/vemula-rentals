@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "190244989576",
+    "project_id": "vemula-e56a2",
+    "storage_bucket": "vemula-e56a2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:190244989576:android:1b1529f83c7e7d8b5a8d3d",
+        "android_client_info": {
+          "package_name": "co.median.android.odrmamx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDf_ULVnOO7EDch7-9WK5kEF_guIBm7ITU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

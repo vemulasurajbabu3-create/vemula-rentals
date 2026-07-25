@@ -28,7 +28,7 @@
     },
     "android": {
       "package": "com.vemulaenterprises.app",
-      "googleServicesFile": "./google-services(1).json",
+      "googleServicesFile": "./google-services.json",
       "jsEngine": "hermes",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
