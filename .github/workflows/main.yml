@@ -22,6 +22,18 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
+      
+      - name: Check Keystore Fingerprints
+        run: |
+          for file in *.jks frontend/*.jks; do
+            if [ -f "$file" ]; then
+              echo "=========================================="
+              echo "Checking fingerprint for: $file"
+              echo "=========================================="
+              keytool -list -v -keystore "$file" -storepass Suraj@123 2>&1 | grep -i "SHA1:" || true
+              echo ""
+            fi
+          done
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
