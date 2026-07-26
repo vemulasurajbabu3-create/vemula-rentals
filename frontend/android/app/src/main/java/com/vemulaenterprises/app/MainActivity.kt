@@ -6,7 +6,6 @@ import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 import expo.modules.ReactActivityDelegateWrapper
-import com.vemulaenterprises.app.BuildConfig
 
 class MainActivity : ReactActivity() {
 
@@ -19,7 +18,7 @@ class MainActivity : ReactActivity() {
   override fun createReactActivityDelegate(): ReactActivityDelegate {
     return ReactActivityDelegateWrapper(
       this,
-      BuildConfig.IS_NEW_ARCHITECTURE_ENABLED,
+      fabricEnabled,
       object : DefaultReactActivityDelegate(
         this,
         mainComponentName,
